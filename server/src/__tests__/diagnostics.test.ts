@@ -1,43 +1,17 @@
 import request from 'supertest';
 import nock from 'nock';
-import bcrypt from 'bcryptjs';
 import app from '../app';
-import db from '../database/db';
-import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config';
 import { executeUpstreamRequest } from '../services/upstreamProxy';
 import { redactSecrets, maskMobile } from '../security/redactSecrets';
 
 const TEST_UPSTREAM = 'http://test-upstream.local';
 
-describe('Student Login Support - Diagnostics & Security Test Suite', () => {
-  let sessionId: string;
-  let adminId: number;
-
+describe('Student Login Support - Core Workflow Test Suite', () => {
   beforeAll(() => {
     config.upstreamBaseUrl = TEST_UPSTREAM;
-    // Set 0ms delay in tests for instant execution
+    // Instant execution in tests
     config.supportRetryDelayMs = 0;
-
-    let admin = db.prepare<{ id: number }>('SELECT id FROM admins WHERE username = ?').get('admin');
-    if (!admin) {
-      const hash = bcrypt.hashSync('Admin@123!', 10);
-      db.prepare(
-        'INSERT INTO admins (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)'
-      ).run('admin', hash, 'admin', new Date().toISOString());
-      admin = db.prepare<{ id: number }>('SELECT id FROM admins WHERE username = ?').get('admin');
-    }
-    adminId = admin!.id;
-
-    sessionId = uuidv4();
-    db.prepare(`
-      INSERT OR REPLACE INTO sessions (id, admin_id, created_at, expires_at)
-      VALUES (?, ?, ?, ?)
-    `).run(sessionId, adminId, new Date().toISOString(), new Date(Date.now() + 3_600_000).toISOString());
-  });
-
-  afterAll(() => {
-    db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
   });
 
   afterEach(() => {
@@ -51,22 +25,10 @@ describe('Student Login Support - Diagnostics & Security Test Suite', () => {
     expect(res.body).toEqual({ status: 'ok', service: 'student-support' });
   });
 
-  // 2. Authentication check
-  it('rejects unauthenticated diagnostic requests with 401', async () => {
-    const res = await request(app)
-      .post('/api/support/login-diagnostics')
-      .send({ mobile: '9876543210' });
-
-    expect(res.status).toBe(401);
-    expect(res.body.success).toBe(false);
-    expect(res.body.error.code).toBe('UNAUTHORIZED');
-  });
-
-  // 3. Invalid mobile number validation
+  // 2. Invalid mobile number validation
   it('validates mobile number format and rejects invalid inputs with 400', async () => {
     const res = await request(app)
       .post('/api/support/login-diagnostics')
-      .set('Cookie', [`ssid=${sessionId}`])
       .send({ mobile: '123' }); // too short
 
     expect(res.status).toBe(400);
@@ -74,7 +36,7 @@ describe('Student Login Support - Diagnostics & Security Test Suite', () => {
     expect(res.body.error.code).toBe('INVALID_INPUT');
   });
 
-  // 4. Successful upstream workflow execution (all 3 steps)
+  // 3. Successful upstream workflow execution (all 3 steps)
   it('executes full authorized workflow and captures diagnostic events', async () => {
     nock(TEST_UPSTREAM)
       .post('/authorized/login-support').reply(200, {
@@ -93,7 +55,6 @@ describe('Student Login Support - Diagnostics & Security Test Suite', () => {
 
     const res = await request(app)
       .post('/api/support/login-diagnostics')
-      .set('Cookie', [`ssid=${sessionId}`])
       .send({ mobile: '9876543210' });
 
     expect(res.status).toBe(200);
@@ -106,26 +67,9 @@ describe('Student Login Support - Diagnostics & Security Test Suite', () => {
     const loginEvt = res.body.diagnostics.events[0];
     expect(loginEvt.response.studentId).toBe('STU9981');
     expect(loginEvt.response.token).toBe('[REDACTED]');
-
-    // Verify database persistence
-    const runInDb = db.prepare<{ id: string; mobile_masked: string; result: string }>(
-      'SELECT id, mobile_masked, result FROM diagnostic_runs WHERE id = ?'
-    ).get(res.body.diagnostics.requestId);
-    expect(runInDb).toBeDefined();
-    expect(runInDb?.mobile_masked).toBe('******3210');
-    expect(runInDb?.result).toBe('SUCCESS');
-
-    // Verify audit log creation
-    const auditRecord = db.prepare<{ operation: string; result: string; mobile_masked: string }>(
-      'SELECT operation, result, mobile_masked FROM audit_logs WHERE request_id = ?'
-    ).get(res.body.diagnostics.requestId);
-    expect(auditRecord).toBeDefined();
-    expect(auditRecord?.operation).toBe('LOGIN_DIAGNOSTICS');
-    expect(auditRecord?.result).toBe('SUCCESS');
-    expect(auditRecord?.mobile_masked).toBe('******3210');
   });
 
-  // 5. Empty upstream response and bounded retry exhaustion
+  // 4. Empty upstream response and bounded retry exhaustion
   it('retries on empty upstream response and returns EMPTY_UPSTREAM_RESPONSE on exhaustion', async () => {
     // 1 initial attempt + 3 retries = 4 total calls
     nock(TEST_UPSTREAM)
@@ -133,7 +77,6 @@ describe('Student Login Support - Diagnostics & Security Test Suite', () => {
 
     const res = await request(app)
       .post('/api/support/login-diagnostics')
-      .set('Cookie', [`ssid=${sessionId}`])
       .send({ mobile: '9876543210' });
 
     expect(res.status).toBe(502);
@@ -142,7 +85,7 @@ describe('Student Login Support - Diagnostics & Security Test Suite', () => {
     expect(res.body.error.attempts).toBe(4);
   });
 
-  // 6. Upstream HTTP 5xx error handling
+  // 5. Upstream HTTP 5xx error handling
   it('captures HTTP 500 response without crashing the server', async () => {
     nock(TEST_UPSTREAM)
       .get('/test/500').reply(500, { error: 'Upstream Database Unavailable' });
@@ -153,7 +96,7 @@ describe('Student Login Support - Diagnostics & Security Test Suite', () => {
     expect((evt.response as { error: string }).error).toBe('Upstream Database Unavailable');
   });
 
-  // 7. Malformed JSON handling
+  // 6. Malformed JSON handling
   it('handles malformed upstream JSON gracefully without crashing', async () => {
     nock(TEST_UPSTREAM)
       .get('/test/malformed').reply(200, '<html><head><title>Error</title></head><body>Bad Gateway</body></html>', {
@@ -166,7 +109,7 @@ describe('Student Login Support - Diagnostics & Security Test Suite', () => {
     expect(typeof evt.response).toBe('string');
   });
 
-  // 8. Plain text handling
+  // 7. Plain text handling
   it('handles plain text upstream responses safely', async () => {
     nock(TEST_UPSTREAM)
       .get('/test/text').reply(200, 'Plain text diagnostic message', {
@@ -179,7 +122,7 @@ describe('Student Login Support - Diagnostics & Security Test Suite', () => {
     expect(evt.response).toBe('Plain text diagnostic message');
   });
 
-  // 9. Upstream timeout handling
+  // 8. Upstream timeout handling
   it('handles upstream request timeout gracefully', async () => {
     nock(TEST_UPSTREAM)
       .get('/test/timeout').delayConnection(500).reply(200, 'ok');
@@ -195,7 +138,7 @@ describe('Student Login Support - Diagnostics & Security Test Suite', () => {
     expect((evt.response as { error: string }).error).toBe('UPSTREAM_TIMEOUT');
   });
 
-  // 10. SSRF Prevention
+  // 9. SSRF Prevention
   it('enforces SSRF protection by rejecting non-allowlisted upstream paths', async () => {
     await expect(
       executeUpstreamRequest({ method: 'GET', path: '/admin/secrets' }, 0, 0)

@@ -29,15 +29,3 @@ export interface DiagnosticsResponse {
     attempts?: number;
   };
 }
-
-export interface AdminUser {
-  id: number;
-  username: string;
-  role: string;
-}
-
-export interface AuthState {
-  user: AdminUser | null;
-  loading: boolean;
-  error: string | null;
-}
