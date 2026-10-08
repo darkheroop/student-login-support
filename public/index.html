@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Student Login Support — Diagnostics</title>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="page-layout">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-group">
+        <div class="logo-icon">🔍</div>
+        <div>
+          <h1>Student Login Support</h1>
+          <p class="subtitle">Authorized Upstream Login Diagnostic System</p>
+        </div>
+      </div>
+      <div class="status-indicator">
+        <span class="live-dot"></span>
+        <span>Stateless Engine Active</span>
+      </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="main-content">
+      <!-- Input Card -->
+      <section class="card input-card">
+        <div class="card-intro">
+          <h2>Enter Student Mobile Number</h2>
+          <p>Initiate the authorized diagnostic workflow to observe request/response state from the upstream service.</p>
+        </div>
+
+        <form id="diagnostics-form" class="diagnostics-form" autocomplete="off">
+          <div class="form-row">
+            <div class="input-wrapper">
+              <span class="input-icon">📱</span>
+              <input
+                type="text"
+                id="mobile-input"
+                name="mobile"
+                placeholder="e.g. +91 98765 43210"
+                required
+                autofocus
+              />
+            </div>
+            <button type="submit" id="submit-btn" class="submit-btn">
+              <span class="btn-text">Check Login Status</span>
+              <span class="btn-spinner" hidden></span>
+            </button>
+          </div>
+          <div id="validation-error" class="validation-error" hidden></div>
+        </form>
+      </section>
+
+      <!-- Loading State Card -->
+      <section id="loading-card" class="card status-card loading-card" hidden>
+        <div class="spinner"></div>
+        <h3>Executing Diagnostic Flow...</h3>
+        <p>Forwarding requests through authorized upstream proxy and capturing response payloads</p>
+      </section>
+
+      <!-- Error State Card -->
+      <section id="error-card" class="card status-card error-card" hidden>
+        <div class="error-badge">⚠️</div>
+        <div class="error-content">
+          <h3 id="error-title">Diagnostic Failed</h3>
+          <p id="error-message">Unable to communicate with the authorized upstream service.</p>
+        </div>
+      </section>
+
+      <!-- Results Card -->
+      <section id="results-card" class="card results-card" hidden>
+        <div class="results-header">
+          <div class="status-pill success-pill">
+            <span class="check-icon">✓</span> Diagnostic Workflow Complete
+          </div>
+          <div class="metrics-row">
+            <div class="metric">
+              <span class="metric-label">Duration</span>
+              <span id="metric-duration" class="metric-value font-mono">0ms</span>
+            </div>
+            <div class="metric-divider">•</div>
+            <div class="metric">
+              <span class="metric-label">Requests</span>
+              <span id="metric-requests" class="metric-value font-mono">0</span>
+            </div>
+            <div class="metric-divider">•</div>
+            <div class="metric">
+              <span class="metric-label">Responses</span>
+              <span id="metric-responses" class="metric-value font-mono">0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Request Timeline -->
+        <div class="timeline-container">
+          <h3>Diagnostic Request & Response Timeline</h3>
+          <div id="timeline-list" class="timeline-list">
+            <!-- Timeline items dynamically inserted here -->
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>Authorized Support Environment • Pure Stateless Diagnostics • Opaque Payload Capture</p>
+    </footer>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
