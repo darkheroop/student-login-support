@@ -1,10 +1,11 @@
-// Sensitive key patterns to redact
+// Sensitive key patterns to redact (credentials / secrets only)
 const SENSITIVE_KEY_PATTERNS = [
   /^password$/i,
   /.*password.*/i,
   /.*passwd.*/i,
   /^otp$/i,
-  /.*otp.*/i,
+  /^otp_code$/i,
+  /^otp_val$/i,
   /^token$/i,
   /.*token$/i,      // matches accessToken, refreshToken, authToken, csrfToken, etc.
   /^token_.*/i,
@@ -17,12 +18,15 @@ const SENSITIVE_KEY_PATTERNS = [
   /^cvv$/i,
   /^ssn$/i,
   /(^|[_\W])pin($|[_\W])/i,
-  /pinCode/i,
   /userPin/i,
   /authPin/i,
 ];
 
 function isSensitiveKey(key: string): boolean {
+  // Never redact operational diagnostics or status fields
+  if (/status|message|msg|count|type|time|attempt|flag|success/i.test(key)) {
+    return false;
+  }
   return SENSITIVE_KEY_PATTERNS.some(pattern => pattern.test(key));
 }
 

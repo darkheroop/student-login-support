@@ -36,12 +36,19 @@ function parseResponseBody(data: unknown): { parsed: unknown; type: 'json' | 'te
 export interface UpstreamRequestOptions {
   method: 'GET' | 'POST' | 'PUT';
   path: string;
+  baseUrl?: string;
+  params?: Record<string, unknown>;
   body?: Record<string, unknown>;
   headers?: Record<string, string>;
 }
 
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT']);
-const ALLOWED_PATH_PREFIX = '/authorized/';
+const ALLOWED_PATH_PREFIXES = ['/sims-services/', '/authorized/', '/test/', '/api/'];
+const ALLOWED_HOSTS = new Set([
+  'edunova.abes.ac.in',
+  'oma.digitaledu.in',
+  'ai-edunova.abes.ac.in'
+]);
 
 export async function executeUpstreamRequest(
   options: UpstreamRequestOptions,
@@ -52,14 +59,27 @@ export async function executeUpstreamRequest(
     throw new Error(`SSRF Prevention: HTTP method '${options.method}' is not authorized.`);
   }
 
-  if (!options.path.startsWith(ALLOWED_PATH_PREFIX) && !options.path.startsWith('/test/')) {
+  const isAllowedPath = ALLOWED_PATH_PREFIXES.some(prefix => options.path.startsWith(prefix));
+  if (!isAllowedPath) {
     throw new Error(`SSRF Prevention: Upstream path '${options.path}' is not allowlisted.`);
+  }
+
+  let baseUrl = config.upstreamBaseUrl.replace(/\/+$/, '');
+  if (options.baseUrl) {
+    const override = options.baseUrl.replace(/\/+$/, '');
+    try {
+      const parsed = new URL(override);
+      if (ALLOWED_HOSTS.has(parsed.hostname)) {
+        baseUrl = override;
+      }
+    } catch {
+      // Keep default baseUrl if override is malformed
+    }
   }
 
   const requestId = uuidv4();
   const timestamp = new Date().toISOString();
   const startTime = Date.now();
-  const baseUrl = config.upstreamBaseUrl.replace(/\/+$/, '');
   const url = `${baseUrl}${options.path}`;
 
   let lastEvent: DiagnosticEvent | null = null;
@@ -74,30 +94,45 @@ export async function executeUpstreamRequest(
       const response = await axios({
         method: options.method,
         url,
+        params: options.params,
         data: options.body,
         headers: {
-          'Content-Type': 'application/json',
           'Accept': 'application/json, text/plain, */*',
-          'User-Agent': 'StudentSupport-DiagnosticEngine/1.0',
+          'hash': 'trr36pdthb9xbhcppyqkgbpkq',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+          'Origin': 'https://ai-edunova.abes.ac.in',
+          'Referer': 'https://ai-edunova.abes.ac.in/',
           ...options.headers,
         },
         timeout: config.upstreamTimeoutMs,
         validateStatus: () => true, // capture all status codes (2xx, 4xx, 5xx) without throwing
-        maxRedirects: 0,
+        maxRedirects: 5,
         transformResponse: [(data) => data], // Preserve raw response body
       });
 
       const durationMs = Date.now() - startTime;
       const { parsed, type } = parseResponseBody(response.data);
 
+      let fullUrl = url;
+      if (options.params) {
+        const query = new URLSearchParams();
+        for (const [k, v] of Object.entries(options.params)) {
+          query.set(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+        }
+        fullUrl = `${url}?${query.toString()}`;
+      }
+
       lastEvent = {
         requestId,
         timestamp,
         method: options.method,
         path: options.path,
+        url: fullUrl,
+        requestPayload: options.params || options.body || null,
         status: response.status,
         durationMs,
         response: parsed,
+        responseHeaders: response.headers as Record<string, string>,
         responseType: type,
         retryAttempt: attempt,
       };

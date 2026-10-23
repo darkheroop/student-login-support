@@ -17,6 +17,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const metricResponses = document.getElementById('metric-responses');
   const timelineList = document.getElementById('timeline-list');
 
+  const analysisBox = document.getElementById('analysis-box');
+  const analysisIcon = document.getElementById('analysis-icon');
+  const analysisTitle = document.getElementById('analysis-title');
+  const analysisSummary = document.getElementById('analysis-summary');
+  const analysisAction = document.getElementById('analysis-action');
+
   // Basic mobile regex
   const mobileRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\s./0-9]{6,16}$/;
 
@@ -102,12 +108,41 @@ document.addEventListener('DOMContentLoaded', () => {
     metricRequests.textContent = diagnostics.requestCount;
     metricResponses.textContent = diagnostics.responseCount;
 
+    if (diagnostics.analysis) {
+      analysisBox.hidden = false;
+      analysisTitle.textContent = diagnostics.analysis.title;
+      analysisSummary.textContent = diagnostics.analysis.summary;
+      analysisAction.textContent = diagnostics.analysis.recommendedAction;
+
+      analysisBox.className = 'analysis-box';
+      if (diagnostics.analysis.verdict === 'SUCCESS') {
+        analysisBox.classList.add('verdict-success');
+        analysisIcon.textContent = '✅';
+      } else if (diagnostics.analysis.verdict === 'GATEWAY_DELAY') {
+        analysisBox.classList.add('verdict-delay');
+        analysisIcon.textContent = '⏳';
+      } else if (diagnostics.analysis.verdict === 'STUDENT_NOT_FOUND') {
+        analysisBox.classList.add('verdict-not-found');
+        analysisIcon.textContent = '⚠️';
+      } else if (diagnostics.analysis.verdict === 'RATE_LIMITED') {
+        analysisBox.classList.add('verdict-rate-limited');
+        analysisIcon.textContent = '🛑';
+      } else {
+        analysisBox.classList.add('verdict-error');
+        analysisIcon.textContent = '❌';
+      }
+    } else {
+      analysisBox.hidden = true;
+    }
+
     timelineList.innerHTML = '';
 
     diagnostics.events.forEach((event, index) => {
       const item = createTimelineItem(event, index);
       timelineList.appendChild(item);
     });
+
+    mobileInput.select();
   }
 
   function createTimelineItem(event, index) {
@@ -122,13 +157,14 @@ document.addEventListener('DOMContentLoaded', () => {
         : 'badge-5xx';
 
     const statusText = event.status > 0 ? `${event.status}` : 'ERR';
+    const displayUrl = event.url || event.path;
 
     item.innerHTML = `
       <div class="timeline-item-header">
         <div class="header-left">
           <span class="step-num">Step ${index + 1}</span>
           <span class="http-method ${event.method}">${event.method}</span>
-          <span class="endpoint-path font-mono">${escapeHtml(event.path)}</span>
+          <span class="endpoint-path font-mono">${escapeHtml(displayUrl)}</span>
         </div>
         <div class="header-right">
           ${event.retryAttempt ? `<span class="duration-tag font-mono">(Retry #${event.retryAttempt})</span>` : ''}
@@ -138,11 +174,22 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       </div>
       <div class="timeline-item-body">
-        <div class="payload-toolbar">
-          <span class="payload-title">Opaque Upstream Payload (${event.responseType})</span>
-          <button type="button" class="copy-btn">Copy Payload</button>
+        ${event.requestPayload ? `
+        <div class="payload-section" style="margin-bottom: 1rem;">
+          <div class="payload-toolbar">
+            <span class="payload-title">Intercepted Outgoing Request</span>
+            <button type="button" class="copy-btn copy-req-btn">Copy Request</button>
+          </div>
+          <pre class="payload-pre font-mono"><code>${formatPayload(event.requestPayload)}</code></pre>
+        </div>` : ''}
+
+        <div class="payload-section">
+          <div class="payload-toolbar">
+            <span class="payload-title">Intercepted Upstream Response (${event.responseType})</span>
+            <button type="button" class="copy-btn copy-res-btn">Copy Response</button>
+          </div>
+          <pre class="payload-pre font-mono"><code>${formatPayload(event.response)}</code></pre>
         </div>
-        <pre class="payload-pre font-mono"><code>${formatPayload(event.response)}</code></pre>
       </div>
     `;
 
@@ -152,20 +199,33 @@ document.addEventListener('DOMContentLoaded', () => {
       item.classList.toggle('open');
     });
 
-    // Copy payload button
-    const copyBtn = item.querySelector('.copy-btn');
-    copyBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const rawText = typeof event.response === 'object'
-        ? JSON.stringify(event.response, null, 2)
-        : String(event.response ?? '');
-      await navigator.clipboard.writeText(rawText);
-      const originalText = copyBtn.textContent;
-      copyBtn.textContent = 'Copied!';
-      setTimeout(() => {
-        copyBtn.textContent = originalText;
-      }, 1800);
-    });
+    // Copy request button
+    const copyReqBtn = item.querySelector('.copy-req-btn');
+    if (copyReqBtn) {
+      copyReqBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const rawText = typeof event.requestPayload === 'object'
+          ? JSON.stringify(event.requestPayload, null, 2)
+          : String(event.requestPayload ?? '');
+        await navigator.clipboard.writeText(rawText);
+        copyReqBtn.textContent = 'Copied!';
+        setTimeout(() => { copyReqBtn.textContent = 'Copy Request'; }, 1800);
+      });
+    }
+
+    // Copy response button
+    const copyResBtn = item.querySelector('.copy-res-btn');
+    if (copyResBtn) {
+      copyResBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const rawText = typeof event.response === 'object'
+          ? JSON.stringify(event.response, null, 2)
+          : String(event.response ?? '');
+        await navigator.clipboard.writeText(rawText);
+        copyResBtn.textContent = 'Copied!';
+        setTimeout(() => { copyResBtn.textContent = 'Copy Response'; }, 1800);
+      });
+    }
 
     return item;
   }
