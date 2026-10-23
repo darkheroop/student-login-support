@@ -53,6 +53,16 @@
               <span class="btn-spinner" hidden></span>
             </button>
           </div>
+          <div class="auth-row" style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-size: 0.8rem; color: var(--text-muted);">🔑 API Key:</span>
+            <input
+              type="password"
+              id="api-key-input"
+              name="apiKey"
+              placeholder="Paste API key (saved locally in browser)"
+              style="background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.35rem 0.65rem; color: var(--text-primary); font-size: 0.8rem; width: 310px;"
+            />
+          </div>
           <div id="validation-error" class="validation-error" hidden></div>
         </form>
       </section>

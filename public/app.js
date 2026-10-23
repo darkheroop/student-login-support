@@ -23,6 +23,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const analysisSummary = document.getElementById('analysis-summary');
   const analysisAction = document.getElementById('analysis-action');
 
+  const apiKeyInput = document.getElementById('api-key-input');
+  if (apiKeyInput) {
+    const savedKey = localStorage.getItem('support_api_key');
+    if (savedKey) apiKeyInput.value = savedKey;
+  }
+
   // Basic mobile regex
   const mobileRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\s./0-9]{6,16}$/;
 
@@ -30,6 +36,10 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
 
     const mobile = mobileInput.value.trim();
+    const apiKey = apiKeyInput ? apiKeyInput.value.trim() : '';
+    if (apiKey) {
+      localStorage.setItem('support_api_key', apiKey);
+    }
 
     // Client-side validation
     if (!mobile || !mobileRegex.test(mobile)) {
@@ -43,12 +53,17 @@ document.addEventListener('DOMContentLoaded', () => {
     setLoadingState(true);
 
     try {
+      const headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      };
+      if (apiKey) {
+        headers['x-api-key'] = apiKey;
+      }
+
       const response = await fetch('/api/support/login-diagnostics', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers,
         body: JSON.stringify({ mobile }),
       });
 

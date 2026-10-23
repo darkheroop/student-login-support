@@ -9,6 +9,7 @@ import { config } from './config';
 import logger from './utils/logger';
 import { apiRateLimiter } from './middleware/rateLimit';
 import { errorHandler } from './middleware/errorHandler';
+import { apiKeyAuth } from './middleware/apiKeyAuth';
 import { runLoginDiagnostics } from './services/diagnosticsService';
 
 export const app = express();
@@ -22,6 +23,7 @@ app.use(helmet({
 
 app.use(cors({
   origin: config.corsOrigin === '*' ? true : config.corsOrigin,
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'Accept'],
 }));
 
 app.use(express.json({ limit: '1mb' }));
@@ -41,8 +43,8 @@ const diagnosticsSchema = z.object({
   mobile: z.string().min(7).max(20).regex(mobileRegex, 'Invalid mobile number format'),
 });
 
-// Single Public Workflow Endpoint
-app.post('/api/support/login-diagnostics', async (req: Request, res: Response, next: NextFunction) => {
+// Single Public Workflow Endpoint (Protected by apiKeyAuth)
+app.post('/api/support/login-diagnostics', apiKeyAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const parseResult = diagnosticsSchema.safeParse(req.body);
     if (!parseResult.success) {
