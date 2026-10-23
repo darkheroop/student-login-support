@@ -13,6 +13,9 @@ import { runLoginDiagnostics } from './services/diagnosticsService';
 
 export const app = express();
 
+// Trust proxy for rate limiting behind Vercel/Cloudflare/reverse proxies
+app.set('trust proxy', 1);
+
 app.use(helmet({
   contentSecurityPolicy: false,
 }));
@@ -84,8 +87,8 @@ if (publicDir) {
 // Safe error handler
 app.use(errorHandler);
 
-// Start server when run directly (not during unit tests)
-if (process.env.NODE_ENV !== 'test') {
+// Start server when run directly (not during unit tests or on Vercel serverless)
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   app.listen(config.port, '0.0.0.0', () => {
     logger.info(`Student Login Diagnostic service listening on port ${config.port}`);
     logger.info(`Configured upstream service: ${config.upstreamBaseUrl}`);

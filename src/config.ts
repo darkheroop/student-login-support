@@ -16,7 +16,7 @@ export interface Config {
 const nodeEnv = process.env.NODE_ENV || 'development';
 const isTest = nodeEnv === 'test';
 
-const rawUpstreamUrl = process.env.UPSTREAM_BASE_URL?.trim() || (isTest ? 'http://test-upstream.local' : '');
+const rawUpstreamUrl = process.env.UPSTREAM_BASE_URL?.trim() || (isTest ? 'http://test-upstream.local' : 'https://edunova.abes.ac.in');
 
 if (!rawUpstreamUrl) {
   throw new Error('Configuration error: UPSTREAM_BASE_URL is required. The support application cannot start without an explicitly configured authorized upstream target.');
