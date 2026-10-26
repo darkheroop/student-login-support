@@ -40,6 +40,10 @@
   padding: 0;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   background-color: var(--bg-base);
   color: var(--text-primary);
@@ -627,6 +631,140 @@ body {
   letter-spacing: 0.05em;
   color: var(--primary-light);
   margin-bottom: 0.25rem;
+}
+
+/* Minimal Result Display Grid (Username & Password) */
+.result-display-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0.5rem 0;
+}
+
+.result-row {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+}
+
+.result-label {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  min-width: 95px;
+  font-weight: 600;
+}
+
+.result-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--primary-light);
+  word-break: break-all;
+}
+
+/* Student Account & Credential Summary Card */
+.credential-summary-card {
+  background: rgba(13, 17, 23, 0.7);
+  border: 1px solid var(--border-light);
+  border-left: 4px solid var(--primary-light);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  margin-top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.cred-summary-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.cred-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.cred-title-group {
+  flex: 1;
+}
+
+.cred-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.cred-username {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #58a6ff;
+}
+
+.cred-status-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  text-transform: uppercase;
+}
+
+.cred-badge-valid {
+  background: rgba(63, 185, 80, 0.15);
+  color: #3fb950;
+  border: 1px solid rgba(63, 185, 80, 0.3);
+}
+
+.cred-badge-invalid {
+  background: rgba(210, 153, 34, 0.15);
+  color: #d29922;
+  border: 1px solid rgba(210, 153, 34, 0.3);
+}
+
+.cred-badge-missing {
+  background: rgba(248, 81, 73, 0.15);
+  color: #f85149;
+  border: 1px solid rgba(248, 81, 73, 0.3);
+}
+
+.cred-summary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.cred-grid-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.cred-grid-item.full-width {
+  grid-column: 1 / -1;
+}
+
+.grid-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.grid-value {
+  font-size: 0.88rem;
+  color: var(--text-primary);
+}
+
+.text-warning {
+  color: #d29922;
 }
 
 /* Footer */
