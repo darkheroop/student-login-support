@@ -1,88 +1,83 @@
-// Admin Dashboard Client-side Application
-(function () {
-  'use strict';
+/**
+ * Admin Dashboard & API Management Client Script
+ * Matches Student Credentials Provider Design & Workflow
+ */
 
-  // State
+document.addEventListener('DOMContentLoaded', () => {
   let csrfToken = null;
   let currentUser = null;
-  let currentKeys = [];
-  let pendingActionKey = null;
+  let activeClientKeys = [];
+  let currentSnippetLanguage = 'curl';
 
-  // DOM Elements - Views
   const viewLogin = document.getElementById('view-login');
   const viewDashboard = document.getElementById('view-dashboard');
+  const alertBox = document.getElementById('alertBox');
+  const headerUsername = document.getElementById('headerUsername');
 
-  // DOM Elements - Auth & Header
+  // Login form elements
   const formLogin = document.getElementById('form-login');
   const inputUsername = document.getElementById('login-username');
   const inputPassword = document.getElementById('login-password');
   const btnLogin = document.getElementById('btn-login');
   const loginError = document.getElementById('login-error');
   const btnLogout = document.getElementById('btn-logout');
-  const displayUser = document.getElementById('display-user');
 
-  // DOM Elements - Tabs
-  const tabBtns = document.querySelectorAll('.tab-btn');
-  const tabPanes = document.querySelectorAll('.tab-pane');
+  // Metrics elements
+  const metricTotal = document.getElementById('metricTotal');
+  const metricActive = document.getElementById('metricActive');
+  const metricRevoked = document.getElementById('metricRevoked');
+  const metricRequests = document.getElementById('metricRequests');
 
-  // DOM Elements - Metrics
-  const statTotalKeys = document.getElementById('stat-total-keys');
-  const statKeysBreakdown = document.getElementById('stat-keys-breakdown');
-  const statActiveKeys = document.getElementById('stat-active-keys');
-  const statRevokedKeys = document.getElementById('stat-revoked-keys');
-  const statTotalRequests = document.getElementById('stat-total-requests');
-  const statSuccessRequests = document.getElementById('stat-success-requests');
-  const statSuccessRate = document.getElementById('stat-success-rate');
-  const statFailedRequests = document.getElementById('stat-failed-requests');
-  const overviewRecentKeysTbody = document.getElementById('overview-recent-keys-tbody');
+  // Client keys elements
+  const clientKeysList = document.getElementById('clientKeysList');
+  const refreshClientKeysBtn = document.getElementById('refreshClientKeysBtn');
+  const createClientKeyForm = document.getElementById('createClientKeyForm');
+  const clientKeyName = document.getElementById('clientKeyName');
+  const clientKeyRateLimit = document.getElementById('clientKeyRateLimit');
+  const clientKeyExpiration = document.getElementById('clientKeyExpiration');
+  const createClientKeyBtn = document.getElementById('createClientKeyBtn');
 
-  // DOM Elements - Keys Table & Filters
-  const keysTableTbody = document.getElementById('keys-table-tbody');
-  const keysSearchInput = document.getElementById('keys-search-input');
-  const keysStatusFilter = document.getElementById('keys-status-filter');
-  const btnRefreshKeys = document.getElementById('btn-refresh-keys');
+  // Reveal secret modal elements
+  const modalSecretReveal = document.getElementById('modalSecretReveal');
+  const revealedSecretKey = document.getElementById('revealedSecretKey');
+  const btnCopySecret = document.getElementById('btnCopySecret');
+  const btnCloseSecretReveal = document.getElementById('btnCloseSecretReveal');
 
-  // DOM Elements - Modals
-  const modalCreateKey = document.getElementById('modal-create-key');
-  const formCreateKey = document.getElementById('form-create-key');
-  const keyProjectName = document.getElementById('key-project-name');
-  const keyDescription = document.getElementById('key-description');
-  const keyExpiration = document.getElementById('key-expiration');
-  const keyRateLimit = document.getElementById('key-rate-limit');
-  const createKeyError = document.getElementById('create-key-error');
+  // Account form elements
+  const accountForm = document.getElementById('accountForm');
+  const accCurrentPassword = document.getElementById('accCurrentPassword');
+  const accNewUsername = document.getElementById('accNewUsername');
+  const accNewPassword = document.getElementById('accNewPassword');
+  const accConfirmPassword = document.getElementById('accConfirmPassword');
+  const saveAccountBtn = document.getElementById('saveAccountBtn');
 
-  const modalSecretReveal = document.getElementById('modal-secret-reveal');
-  const revealedSecretKey = document.getElementById('revealed-secret-key');
-  const btnCopySecret = document.getElementById('btn-copy-secret');
-  const btnCloseSecretReveal = document.getElementById('btn-close-secret-reveal');
+  // Snippets elements
+  const apiBaseUrlDisplay = document.getElementById('apiBaseUrlDisplay');
+  const snippetCode = document.getElementById('snippetCode');
+  const copySnippetBtn = document.getElementById('copySnippetBtn');
+  const snippetTabButtons = document.querySelectorAll('.snippet-tab-btn');
 
-  const modalKeyDetails = document.getElementById('modal-key-details');
-  const detailsMetadataContent = document.getElementById('details-metadata-content');
-  const detailsUsageTbody = document.getElementById('details-usage-tbody');
-
-  const modalRevokeConfirm = document.getElementById('modal-revoke-confirm');
-  const revokeTargetProject = document.getElementById('revoke-target-project');
-  const revokeTargetPrefix = document.getElementById('revoke-target-prefix');
-  const btnConfirmRevoke = document.getElementById('btn-confirm-revoke');
-
-  const modalRotateConfirm = document.getElementById('modal-rotate-confirm');
-  const rotateTargetProject = document.getElementById('rotate-target-project');
-  const btnConfirmRotate = document.getElementById('btn-confirm-rotate');
-
-  // Dynamic documentation endpoint URL
-  const docEndpointUrl = document.getElementById('doc-endpoint-url');
-  if (docEndpointUrl) {
-    docEndpointUrl.textContent = `${window.location.origin}/api/support/login-diagnostics`;
+  if (apiBaseUrlDisplay) {
+    apiBaseUrlDisplay.textContent = window.location.origin;
   }
 
-  /**
-   * Universal authenticated fetch wrapper
-   */
+  function showAlert(message, type = 'success') {
+    if (!alertBox) return;
+    alertBox.textContent = message;
+    alertBox.className = `alert-box alert-${type}`;
+    alertBox.classList.remove('hidden');
+
+    setTimeout(() => {
+      alertBox.classList.add('hidden');
+    }, 6000);
+  }
+
   async function apiFetch(url, options = {}) {
     const opts = { ...options };
     opts.credentials = 'include';
     opts.headers = {
       Accept: 'application/json',
+      'Content-Type': 'application/json',
       ...(opts.headers || {}),
     };
 
@@ -90,28 +85,30 @@
       opts.headers['x-csrf-token'] = csrfToken;
     }
 
-    if (opts.body && typeof opts.body === 'object' && !(opts.body instanceof FormData)) {
-      opts.headers['Content-Type'] = 'application/json';
+    if (opts.body && typeof opts.body === 'object') {
       opts.body = JSON.stringify(opts.body);
     }
 
     const res = await fetch(url, opts);
+
     if (res.status === 401 && !url.includes('/login') && !url.includes('/session')) {
-      // Session expired, return to login
       showLoginView();
       throw new Error('Session expired');
     }
 
-    const data = await res.json().catch(() => ({ success: false, error: { message: 'Unexpected server response.' } }));
-    if (!res.ok && !data.error) {
-      data.error = { message: `Request failed with HTTP ${res.status}` };
-    }
-    return { ok: res.ok, status: res.status, data };
+    return res;
   }
 
-  /**
-   * Helper: Date formatting
-   */
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   function formatDate(isoStr) {
     if (!isoStr) return 'Never';
     try {
@@ -128,26 +125,7 @@
     }
   }
 
-  /**
-   * Status badge HTML helper
-   */
-  function renderStatusBadge(status, expiresAt) {
-    let effectiveStatus = status;
-    if (status === 'active' && expiresAt && new Date(expiresAt) <= new Date()) {
-      effectiveStatus = 'expired';
-    }
-
-    return `
-      <span class="status-badge ${effectiveStatus}">
-        <span class="status-dot"></span>
-        ${effectiveStatus}
-      </span>
-    `;
-  }
-
-  /**
-   * View Management
-   */
+  // ── Views Management ────────────────────────────────────────────────
   function showLoginView() {
     viewLogin.hidden = false;
     viewDashboard.hidden = true;
@@ -155,69 +133,76 @@
     csrfToken = null;
   }
 
-  function showDashboardView(user) {
+  function showDashboardView(username) {
     viewLogin.hidden = true;
     viewDashboard.hidden = false;
-    currentUser = user;
-    displayUser.textContent = user;
+    currentUser = username;
+    if (headerUsername) headerUsername.textContent = username;
+    if (accNewUsername) accNewUsername.value = username;
+
     loadDashboardMetrics();
-    loadKeys();
+    loadClientKeys();
   }
 
-  /**
-   * Check Session on load
-   */
+  // ── Check Session ───────────────────────────────────────────────────
   async function checkSession() {
     try {
-      const { ok, data } = await apiFetch('/api/admin/session');
-      if (ok && data.authenticated) {
-        csrfToken = data.csrfToken;
-        showDashboardView(data.user.username);
-      } else {
-        showLoginView();
+      const res = await apiFetch('/api/admin/session');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.authenticated) {
+          csrfToken = data.csrfToken;
+          showDashboardView(data.user.username);
+          return;
+        }
       }
+      showLoginView();
     } catch {
       showLoginView();
     }
   }
 
-  /**
-   * Login handler
-   */
-  formLogin.addEventListener('submit', async (e) => {
+  // ── Login Form ──────────────────────────────────────────────────────
+  formLogin?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    loginError.hidden = true;
+    if (loginError) loginError.classList.add('hidden');
     btnLogin.disabled = true;
+    btnLogin.textContent = 'Logging In...';
 
     const username = inputUsername.value.trim();
     const password = inputPassword.value;
 
     try {
-      const { ok, data } = await apiFetch('/api/admin/login', {
+      const res = await apiFetch('/api/admin/login', {
         method: 'POST',
         body: { username, password },
       });
 
-      if (ok && data.success) {
+      const data = await res.json();
+      if (res.ok && data.success) {
         csrfToken = data.csrfToken;
         inputPassword.value = '';
         showDashboardView(data.user.username);
       } else {
-        loginError.textContent = data.error?.message || 'Invalid username or password.';
-        loginError.hidden = false;
+        const msg = data.error?.message || 'Invalid username or password.';
+        if (loginError) {
+          loginError.textContent = msg;
+          loginError.classList.remove('hidden');
+        }
       }
     } catch (err) {
-      loginError.textContent = 'Connection error. Please try again.';
-      loginError.hidden = false;
+      if (loginError) {
+        loginError.textContent = 'Connection error. Please try again.';
+        loginError.classList.remove('hidden');
+      }
     } finally {
       btnLogin.disabled = false;
+      btnLogin.textContent = 'Log In';
     }
   });
 
-  /**
-   * Logout handler
-   */
-  btnLogout.addEventListener('click', async () => {
+  // ── Logout ──────────────────────────────────────────────────────────
+  btnLogout?.addEventListener('click', async () => {
     try {
       await apiFetch('/api/admin/logout', { method: 'POST' });
     } finally {
@@ -225,203 +210,198 @@
     }
   });
 
-  /**
-   * Tab Navigation
-   */
-  tabBtns.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const targetId = btn.getAttribute('data-tab');
+  // ── Tab Navigation ──────────────────────────────────────────────────
+  const tabButtons = document.querySelectorAll('.tab-btn');
+  const tabPanes = document.querySelectorAll('.tab-pane');
 
-      tabBtns.forEach((b) => b.classList.remove('active'));
-      tabPanes.forEach((p) => (p.hidden = true));
+  tabButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tabTarget = btn.getAttribute('data-tab');
+
+      tabButtons.forEach((b) => {
+        b.classList.remove('active');
+        b.setAttribute('aria-selected', 'false');
+      });
+      tabPanes.forEach((p) => p.classList.remove('active'));
 
       btn.classList.add('active');
-      const targetPane = document.getElementById(targetId);
-      if (targetPane) targetPane.hidden = false;
+      btn.setAttribute('aria-selected', 'true');
 
-      if (targetId === 'tab-overview') loadDashboardMetrics();
-      if (targetId === 'tab-keys') loadKeys();
+      const targetPane = document.getElementById(`tab-pane-${tabTarget}`);
+      if (targetPane) {
+        targetPane.classList.add('active');
+      }
+
+      if (tabTarget === 'keys') {
+        loadDashboardMetrics();
+        loadClientKeys();
+      } else if (tabTarget === 'reference') {
+        updateCodeSnippets();
+      }
     });
   });
 
-  /**
-   * Load Dashboard Overview Metrics
-   */
+  // ── Dashboard Metrics ───────────────────────────────────────────────
   async function loadDashboardMetrics() {
     try {
-      const { ok, data } = await apiFetch('/api/admin/dashboard');
-      if (!ok || !data.success) return;
+      const res = await apiFetch('/api/admin/dashboard');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.success) return;
 
       const s = data.stats;
-      statTotalKeys.textContent = s.totalKeys.toLocaleString();
-      statKeysBreakdown.textContent = `${s.activeKeys} active, ${s.revokedKeys} revoked`;
-      statActiveKeys.textContent = s.activeKeys.toLocaleString();
-      statRevokedKeys.textContent = (s.revokedKeys + s.expiredKeys).toLocaleString();
-      statTotalRequests.textContent = s.totalRequests.toLocaleString();
-      statSuccessRequests.textContent = s.successfulRequests.toLocaleString();
-      statFailedRequests.textContent = s.failedRequests.toLocaleString();
-
-      const rate = s.totalRequests > 0 ? ((s.successfulRequests / s.totalRequests) * 100).toFixed(1) : '100';
-      statSuccessRate.textContent = `${rate}% success rate`;
-
-      // Render recent keys table on overview
-      if (!s.recentKeys || s.recentKeys.length === 0) {
-        overviewRecentKeysTbody.innerHTML = `
-          <tr>
-            <td colspan="7" class="empty-state">
-              <div class="empty-icon">🔑</div>
-              <div>No API keys generated yet. Click "+ Generate New Key" to create your first key.</div>
-            </td>
-          </tr>
-        `;
-      } else {
-        overviewRecentKeysTbody.innerHTML = s.recentKeys
-          .map((k) => `
-            <tr>
-              <td><strong>${escapeHtml(k.projectName)}</strong></td>
-              <td><code class="font-mono" style="color: #38bdf8;">${escapeHtml(k.keyPrefix)}</code></td>
-              <td>${renderStatusBadge(k.status, k.expiresAt)}</td>
-              <td>${formatDate(k.createdAt)}</td>
-              <td>${formatDate(k.lastUsedAt)}</td>
-              <td>${k.totalRequests}</td>
-              <td>
-                <button class="btn btn-secondary btn-sm" onclick="window.adminApp.openDetails('${k.id}')">View</button>
-              </td>
-            </tr>
-          `)
-          .join('');
-      }
+      if (metricTotal) metricTotal.textContent = s.totalKeys.toLocaleString();
+      if (metricActive) metricActive.textContent = s.activeKeys.toLocaleString();
+      if (metricRevoked) metricRevoked.textContent = (s.revokedKeys + s.expiredKeys).toLocaleString();
+      if (metricRequests) metricRequests.textContent = s.totalRequests.toLocaleString();
     } catch (err) {
-      console.error('Failed to load dashboard stats:', err);
+      console.error('Failed to load metrics:', err);
     }
   }
 
-  /**
-   * Load Keys List
-   */
-  async function loadKeys() {
-    const search = keysSearchInput.value.trim();
-    const status = keysStatusFilter.value;
-
-    let url = `/api/admin/keys?limit=100`;
-    if (search) url += `&search=${encodeURIComponent(search)}`;
-    if (status && status !== 'all') url += `&status=${encodeURIComponent(status)}`;
+  // ── Load Configured Keys ────────────────────────────────────────────
+  async function loadClientKeys() {
+    if (!clientKeysList) return;
 
     try {
-      const { ok, data } = await apiFetch(url);
-      if (!ok || !data.success) {
-        keysTableTbody.innerHTML = `<tr><td colspan="8" class="empty-state">Failed to load API keys.</td></tr>`;
-        return;
-      }
+      clientKeysList.innerHTML = '<p class="empty-state">Loading configured API keys...</p>';
+      const res = await apiFetch('/admin/api/client-keys?limit=100');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      currentKeys = data.keys;
-
-      if (currentKeys.length === 0) {
-        keysTableTbody.innerHTML = `
-          <tr>
-            <td colspan="8" class="empty-state">
-              <div class="empty-icon">🔍</div>
-              <div>No matching API keys found.</div>
-            </td>
-          </tr>
-        `;
-        return;
-      }
-
-      keysTableTbody.innerHTML = currentKeys
-        .map((k) => {
-          const isRevoked = k.status === 'revoked';
-          const isExpired = k.expiresAt && new Date(k.expiresAt) <= new Date();
-          const toggleActionText = k.status === 'active' ? 'Disable' : 'Enable';
-          const toggleActionDisabled = isRevoked || isExpired;
-
-          return `
-            <tr>
-              <td>
-                <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(k.projectName)}</div>
-                ${k.description ? `<div style="font-size: 0.75rem; color: var(--text-muted);">${escapeHtml(k.description)}</div>` : ''}
-              </td>
-              <td>
-                <code class="font-mono" style="color: #38bdf8; font-size: 0.8125rem;">${escapeHtml(k.keyPrefix)}</code>
-              </td>
-              <td>${renderStatusBadge(k.status, k.expiresAt)}</td>
-              <td>${formatDate(k.createdAt)}</td>
-              <td>${k.expiresAt ? formatDate(k.expiresAt) : '<span style="color: var(--text-muted);">Never</span>'}</td>
-              <td>${formatDate(k.lastUsedAt)}</td>
-              <td>
-                <strong>${k.totalRequests}</strong>
-                <span style="font-size: 0.75rem; color: var(--text-muted);">(${k.successfulRequests} ok / ${k.failedRequests} err)</span>
-              </td>
-              <td>
-                <div class="table-actions">
-                  <button class="btn btn-secondary btn-sm" onclick="window.adminApp.openDetails('${k.id}')">Details</button>
-                  ${
-                    !isRevoked
-                      ? `
-                    <button class="btn btn-secondary btn-sm" ${toggleActionDisabled ? 'disabled' : ''} onclick="window.adminApp.toggleStatus('${k.id}', '${k.status === 'active' ? 'disabled' : 'active'}')">${toggleActionText}</button>
-                    <button class="btn btn-secondary btn-sm" onclick="window.adminApp.openRotate('${k.id}')">Rotate</button>
-                    <button class="btn btn-danger btn-sm" onclick="window.adminApp.openRevoke('${k.id}')">Revoke</button>
-                  `
-                      : '<span style="font-size: 0.75rem; color: var(--text-muted);">Revoked</span>'
-                  }
-                </div>
-              </td>
-            </tr>
-          `;
-        })
-        .join('');
+      const data = await res.json();
+      activeClientKeys = data.keys || [];
+      renderClientKeys(activeClientKeys);
+      updateCodeSnippets();
     } catch (err) {
-      console.error('Failed to load keys:', err);
+      clientKeysList.innerHTML = `<p class="empty-state">Error loading keys: ${err.message}</p>`;
+      showAlert(err.message, 'error');
     }
   }
 
-  // Filter & Search listeners
-  let searchTimeout = null;
-  keysSearchInput.addEventListener('input', () => {
-    clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(loadKeys, 300);
-  });
-  keysStatusFilter.addEventListener('change', loadKeys);
-  btnRefreshKeys.addEventListener('click', loadKeys);
+  function renderClientKeys(keys) {
+    if (!clientKeysList) return;
+    clientKeysList.innerHTML = '';
 
-  /**
-   * Modal Management Helpers
-   */
-  function closeModal(modal) {
-    if (modal) modal.hidden = true;
+    if (keys.length === 0) {
+      clientKeysList.innerHTML = '<p class="empty-state">No client API keys created yet. Use the form on the left to generate one.</p>';
+      return;
+    }
+
+    keys.forEach((key) => {
+      const item = document.createElement('div');
+      item.className = 'subadmin-item';
+
+      const info = document.createElement('div');
+      info.className = 'subadmin-info';
+
+      const nameLine = document.createElement('div');
+      nameLine.className = 'subadmin-name';
+      nameLine.innerHTML = `
+        <span>${escapeHtml(key.name || key.projectName)}</span>
+        <span class="status-badge ${key.is_active ? 'status-active' : 'status-disabled'}">
+          ${key.is_active ? 'Active' : 'Revoked'}
+        </span>
+      `;
+      info.appendChild(nameLine);
+
+      const keyDisplay = document.createElement('div');
+      keyDisplay.style.margin = '4px 0';
+      keyDisplay.innerHTML = `
+        <span class="key-token-box">
+          <code>${escapeHtml(key.api_key || key.keyPrefix)}</code>
+          <button type="button" class="btn-copy-inline" title="Copy Key Token">Copy</button>
+        </span>
+      `;
+      const copyBtn = keyDisplay.querySelector('.btn-copy-inline');
+      copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(key.api_key || key.keyPrefix).then(() => {
+          showAlert('Key prefix copied to clipboard!', 'success');
+        });
+      });
+      info.appendChild(keyDisplay);
+
+      const meta = document.createElement('div');
+      meta.className = 'subadmin-meta';
+      meta.innerHTML = `
+        <span><strong>Rate Limit:</strong> ${key.rate_limit_per_minute || 60} req/min</span> &bull;
+        <span><strong>Usage:</strong> ${key.requests_count || 0} calls</span> &bull;
+        <span><strong>Last Used:</strong> ${formatDate(key.last_used_at || key.lastUsedAt)}</span>
+      `;
+      info.appendChild(meta);
+
+      const actions = document.createElement('div');
+      actions.className = 'subadmin-actions';
+
+      // Toggle status button
+      const toggleBtn = document.createElement('button');
+      toggleBtn.type = 'button';
+      toggleBtn.className = 'btn btn-sm btn-outline';
+      toggleBtn.textContent = key.is_active ? 'Revoke' : 'Activate';
+      toggleBtn.onclick = () => toggleClientKey(key.id, key.name || key.projectName);
+      actions.appendChild(toggleBtn);
+
+      // Delete button
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'btn btn-sm btn-danger';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.onclick = () => deleteClientKey(key.id, key.name || key.projectName);
+      actions.appendChild(deleteBtn);
+
+      item.appendChild(info);
+      item.appendChild(actions);
+      clientKeysList.appendChild(item);
+    });
   }
 
-  function openModal(modal) {
-    if (modal) modal.hidden = false;
+  async function toggleClientKey(keyId, name) {
+    try {
+      const res = await apiFetch(`/admin/api/client-keys/${keyId}/toggle`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showAlert(data.message || 'Key status updated.', 'success');
+        loadClientKeys();
+        loadDashboardMetrics();
+      } else {
+        showAlert(data.error?.message || data.error || 'Failed to update key status.', 'error');
+      }
+    } catch (err) {
+      showAlert(`Error: ${err.message}`, 'error');
+    }
   }
 
-  document.querySelectorAll('.btn-close-modal').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.modal-backdrop').forEach(closeModal);
-    });
-  });
+  async function deleteClientKey(keyId, name) {
+    if (!confirm(`Are you sure you want to permanently delete the API key for "${name}"? External requests using this key will immediately be rejected.`)) {
+      return;
+    }
 
-  // Open Create Modal buttons
-  document.querySelectorAll('.btn-open-create-modal').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      formCreateKey.reset();
-      createKeyError.hidden = true;
-      openModal(modalCreateKey);
-      keyProjectName.focus();
-    });
-  });
+    try {
+      const res = await apiFetch(`/admin/api/client-keys/${keyId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showAlert(data.message || 'Key deleted successfully.', 'success');
+        loadClientKeys();
+        loadDashboardMetrics();
+      } else {
+        showAlert(data.error?.message || data.error || 'Failed to delete key.', 'error');
+      }
+    } catch (err) {
+      showAlert(`Error: ${err.message}`, 'error');
+    }
+  }
 
-  /**
-   * Form Create Key Submit
-   */
-  formCreateKey.addEventListener('submit', async (e) => {
+  // ── Create Key Form ─────────────────────────────────────────────────
+  createClientKeyForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    createKeyError.hidden = true;
 
-    const projectName = keyProjectName.value.trim();
-    const description = keyDescription.value.trim();
-    const expVal = keyExpiration.value;
-    const rateLimitVal = keyRateLimit.value.trim();
+    const name = clientKeyName.value.trim();
+    const rateLimit = parseInt(clientKeyRateLimit.value, 10) || 60;
+    const expVal = clientKeyExpiration.value;
+
+    if (!name || name.length < 2) {
+      showAlert('Application or client name must be at least 2 characters.', 'error');
+      return;
+    }
 
     let expiresAt = null;
     if (expVal !== 'never') {
@@ -431,248 +411,273 @@
       expiresAt = d.toISOString();
     }
 
-    const rateLimitPerMinute = rateLimitVal ? parseInt(rateLimitVal, 10) : null;
+    createClientKeyBtn.disabled = true;
+    createClientKeyBtn.textContent = 'Generating...';
 
     try {
-      const { ok, data } = await apiFetch('/api/admin/keys', {
+      const res = await apiFetch('/admin/api/client-keys', {
         method: 'POST',
         body: {
-          projectName,
-          description: description || undefined,
+          name,
+          rate_limit_per_minute: rateLimit,
           expiresAt,
-          rateLimitPerMinute,
         },
       });
 
-      if (!ok || !data.success) {
-        createKeyError.textContent = data.error?.message || 'Failed to generate API key.';
-        createKeyError.hidden = false;
-        return;
+      const data = await res.json();
+      if (res.ok && data.success) {
+        createClientKeyForm.reset();
+        clientKeyRateLimit.value = '60';
+        clientKeyExpiration.value = 'never';
+
+        // Show Plaintext Secret Modal
+        revealedSecretKey.textContent = data.key;
+        modalSecretReveal.classList.remove('hidden');
+
+        showAlert('API Key generated successfully! Make sure to copy the secret key.', 'success');
+        loadClientKeys();
+        loadDashboardMetrics();
+      } else {
+        showAlert(data.error?.message || data.error || 'Failed to generate key.', 'error');
       }
-
-      closeModal(modalCreateKey);
-      // Reveal plaintext secret ONCE
-      revealedSecretKey.textContent = data.key;
-      openModal(modalSecretReveal);
-
-      loadKeys();
-      loadDashboardMetrics();
     } catch (err) {
-      createKeyError.textContent = 'Network error while generating API key.';
-      createKeyError.hidden = false;
+      showAlert(`Error: ${err.message}`, 'error');
+    } finally {
+      createClientKeyBtn.disabled = false;
+      createClientKeyBtn.textContent = 'Generate API Key';
     }
   });
 
-  /**
-   * Copy secret key to clipboard
-   */
-  btnCopySecret.addEventListener('click', async () => {
+  refreshClientKeysBtn?.addEventListener('click', () => {
+    loadClientKeys();
+    loadDashboardMetrics();
+  });
+
+  // Modal actions
+  btnCopySecret?.addEventListener('click', async () => {
     const text = revealedSecretKey.textContent;
     try {
       await navigator.clipboard.writeText(text);
-      const originalText = btnCopySecret.textContent;
-      btnCopySecret.textContent = '✓ Copied to Clipboard!';
+      const orig = btnCopySecret.textContent;
+      btnCopySecret.textContent = '✓ Copied Secret to Clipboard!';
       setTimeout(() => {
-        btnCopySecret.textContent = originalText;
+        btnCopySecret.textContent = orig;
+      }, 2500);
+    } catch {
+      showAlert('Key copied: ' + text, 'success');
+    }
+  });
+
+  btnCloseSecretReveal?.addEventListener('click', () => {
+    modalSecretReveal.classList.add('hidden');
+  });
+
+  // ── Code Snippets Generation ────────────────────────────────────────
+  function getSampleApiKey() {
+    const active = activeClientKeys.find((k) => k.is_active);
+    return active ? (active.api_key || active.keyPrefix) : 'sk_support_your_generated_secret_here';
+  }
+
+  function updateCodeSnippets() {
+    if (!snippetCode) return;
+
+    const origin = window.location.origin || 'https://student-login-support.vercel.app';
+    const apiKey = getSampleApiKey();
+
+    const snippets = {
+      curl: `curl -X POST "${origin}/api/support/login-diagnostics" \\
+  -H "Content-Type: application/json" \\
+  -H "x-api-key: ${apiKey}" \\
+  -d '{
+    "studentNumber": "9599099932"
+  }'`,
+
+      python: `import requests
+
+url = "${origin}/api/support/login-diagnostics"
+headers = {
+    "Content-Type": "application/json",
+    "x-api-key": "${apiKey}"
+}
+payload = {
+    "studentNumber": "9599099932"
+}
+
+response = requests.post(url, json=payload, headers=headers)
+data = response.json()
+
+if data.get("success"):
+    print("Username:", data.get("username"))
+    print("Password Hash:", data.get("password"))
+else:
+    print("Lookup error:", data.get("error"))`,
+
+      javascript: `// Modern Browser or Node.js 18+ (Fetch API)
+async function lookupStudent(studentNumber) {
+  const response = await fetch('${origin}/api/support/login-diagnostics', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': '${apiKey}'
+    },
+    body: JSON.stringify({
+      studentNumber: studentNumber
+    })
+  });
+
+  const data = await response.json();
+  if (data.success) {
+    console.log('Username:', data.username);
+    console.log('Password Hash:', data.password);
+  } else {
+    console.error('Error:', data.error);
+  }
+  return data;
+}
+
+// Example usage:
+lookupStudent('9599099932');`,
+
+      nodejs: `// Node.js with Axios
+const axios = require('axios');
+
+async function lookupStudent(studentNumber) {
+  try {
+    const response = await axios.post('${origin}/api/support/login-diagnostics', {
+      studentNumber: studentNumber
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': '${apiKey}'
+      }
+    });
+
+    return response.data;
+  } catch (error) {
+    console.error('Request failed:', error.response?.data || error.message);
+    throw error;
+  }
+}
+
+lookupStudent('9599099932')
+  .then(res => console.log('Response:', res));`,
+
+      php: `<?php
+// PHP cURL Integration Example
+$url = "${origin}/api/support/login-diagnostics";
+$apiKey = "${apiKey}";
+
+$payload = json_encode([
+    "studentNumber" => "9599099932"
+]);
+
+$ch = curl_init($url);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+curl_setopt($ch, CURLOPT_POST, true);
+curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+curl_setopt($ch, CURLOPT_HTTPHEADER, [
+    "Content-Type: application/json",
+    "x-api-key: " . $apiKey
+]);
+
+$response = curl_exec($ch);
+curl_close($ch);
+
+$data = json_decode($response, true);
+print_r($data);`,
+    };
+
+    snippetCode.textContent = snippets[currentSnippetLanguage] || snippets.curl;
+  }
+
+  snippetTabButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      snippetTabButtons.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentSnippetLanguage = btn.getAttribute('data-snippet');
+      updateCodeSnippets();
+    });
+  });
+
+  copySnippetBtn?.addEventListener('click', async () => {
+    if (!snippetCode) return;
+    try {
+      await navigator.clipboard.writeText(snippetCode.textContent);
+      const orig = copySnippetBtn.textContent;
+      copySnippetBtn.textContent = '✓ Copied!';
+      setTimeout(() => {
+        copySnippetBtn.textContent = orig;
       }, 2000);
     } catch {
-      alert('Key copied: ' + text);
+      showAlert('Code copied to clipboard!', 'success');
     }
   });
 
-  btnCloseSecretReveal.addEventListener('click', () => {
-    closeModal(modalSecretReveal);
-  });
+  // ── My Account (Change Username & Password) ─────────────────────────
+  accountForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
 
-  /**
-   * Toggle Status (Enable/Disable)
-   */
-  async function toggleStatus(id, newStatus) {
-    try {
-      const { ok, data } = await apiFetch(`/api/admin/keys/${id}`, {
-        method: 'PATCH',
-        body: { status: newStatus },
-      });
+    const currentPassword = accCurrentPassword.value.trim();
+    const newUsername = accNewUsername.value.trim();
+    const newPassword = accNewPassword.value.trim();
+    const confirmPassword = accConfirmPassword.value.trim();
 
-      if (!ok) {
-        alert(data.error?.message || 'Failed to update key status.');
+    if (!currentPassword) {
+      showAlert('Current password is required to save account changes.', 'error');
+      return;
+    }
+
+    if (newPassword) {
+      if (newPassword.length < 6) {
+        showAlert('New password must be at least 6 characters long.', 'error');
         return;
       }
-
-      loadKeys();
-      loadDashboardMetrics();
-    } catch {
-      alert('Error updating API key status.');
+      if (newPassword !== confirmPassword) {
+        showAlert('New password and confirmation do not match.', 'error');
+        return;
+      }
     }
-  }
 
-  /**
-   * Open Revoke Confirmation Modal
-   */
-  function openRevoke(id) {
-    const key = currentKeys.find((k) => k.id === id);
-    if (!key) return;
+    saveAccountBtn.disabled = true;
+    saveAccountBtn.textContent = 'Updating...';
 
-    pendingActionKey = key;
-    revokeTargetProject.textContent = key.projectName;
-    revokeTargetPrefix.textContent = key.keyPrefix;
-    openModal(modalRevokeConfirm);
-  }
-
-  btnConfirmRevoke.addEventListener('click', async () => {
-    if (!pendingActionKey) return;
     try {
-      const { ok, data } = await apiFetch(`/api/admin/keys/${pendingActionKey.id}/revoke`, {
+      const payload = {
+        current_password: currentPassword,
+      };
+
+      if (newUsername) {
+        payload.new_username = newUsername;
+      }
+      if (newPassword) {
+        payload.new_password = newPassword;
+      }
+
+      const res = await apiFetch('/admin/api/account/update', {
         method: 'POST',
+        body: payload,
       });
 
-      if (!ok) {
-        alert(data.error?.message || 'Failed to revoke API key.');
-        return;
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showAlert(data.message || 'Credentials updated successfully.', 'success');
+        if (data.username && headerUsername) {
+          headerUsername.textContent = data.username;
+        }
+        accCurrentPassword.value = '';
+        accNewPassword.value = '';
+        accConfirmPassword.value = '';
+      } else {
+        showAlert(data.error?.message || data.error || 'Failed to update credentials.', 'error');
       }
-
-      closeModal(modalRevokeConfirm);
-      pendingActionKey = null;
-      loadKeys();
-      loadDashboardMetrics();
-    } catch {
-      alert('Error revoking API key.');
+    } catch (err) {
+      showAlert(`Error: ${err.message}`, 'error');
+    } finally {
+      saveAccountBtn.disabled = false;
+      saveAccountBtn.textContent = 'Update Account Credentials';
     }
   });
 
-  /**
-   * Open Rotate Confirmation Modal
-   */
-  function openRotate(id) {
-    const key = currentKeys.find((k) => k.id === id);
-    if (!key) return;
-
-    pendingActionKey = key;
-    rotateTargetProject.textContent = key.projectName;
-    openModal(modalRotateConfirm);
-  }
-
-  btnConfirmRotate.addEventListener('click', async () => {
-    if (!pendingActionKey) return;
-    try {
-      const { ok, data } = await apiFetch(`/api/admin/keys/${pendingActionKey.id}/rotate`, {
-        method: 'POST',
-      });
-
-      if (!ok || !data.success) {
-        alert(data.error?.message || 'Failed to rotate API key.');
-        return;
-      }
-
-      closeModal(modalRotateConfirm);
-      pendingActionKey = null;
-
-      // Reveal new plaintext secret
-      revealedSecretKey.textContent = data.key;
-      openModal(modalSecretReveal);
-
-      loadKeys();
-      loadDashboardMetrics();
-    } catch {
-      alert('Error rotating API key.');
-    }
-  });
-
-  /**
-   * Open Key Details & Usage Logs
-   */
-  async function openDetails(id) {
-    let key = currentKeys.find((k) => k.id === id);
-    if (!key) {
-      const { ok, data } = await apiFetch(`/api/admin/keys/${id}`);
-      if (ok && data.key) key = data.key;
-    }
-    if (!key) return;
-
-    detailsMetadataContent.innerHTML = `
-      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; background: var(--bg-base); padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
-        <div>
-          <span style="font-size: 0.75rem; color: var(--text-muted); display: block;">PROJECT NAME</span>
-          <strong style="color: var(--text-primary); font-size: 0.9375rem;">${escapeHtml(key.projectName)}</strong>
-        </div>
-        <div>
-          <span style="font-size: 0.75rem; color: var(--text-muted); display: block;">KEY IDENTIFIER</span>
-          <code class="font-mono" style="color: #38bdf8;">${escapeHtml(key.keyPrefix)}</code>
-        </div>
-        <div>
-          <span style="font-size: 0.75rem; color: var(--text-muted); display: block;">STATUS</span>
-          ${renderStatusBadge(key.status, key.expiresAt)}
-        </div>
-        <div>
-          <span style="font-size: 0.75rem; color: var(--text-muted); display: block;">RATE LIMIT</span>
-          <span>${key.rateLimitPerMinute ? `${key.rateLimitPerMinute} req/min` : 'Global limit'}</span>
-        </div>
-        <div>
-          <span style="font-size: 0.75rem; color: var(--text-muted); display: block;">CREATED</span>
-          <span>${formatDate(key.createdAt)}</span>
-        </div>
-        <div>
-          <span style="font-size: 0.75rem; color: var(--text-muted); display: block;">EXPIRES</span>
-          <span>${key.expiresAt ? formatDate(key.expiresAt) : 'Never'}</span>
-        </div>
-        <div style="grid-column: span 2;">
-          <span style="font-size: 0.75rem; color: var(--text-muted); display: block;">TOTAL USAGE</span>
-          <span><strong>${key.totalRequests}</strong> total requests (${key.successfulRequests} successful, ${key.failedRequests} failed)</span>
-        </div>
-      </div>
-    `;
-
-    detailsUsageTbody.innerHTML = `<tr><td colspan="5" class="empty-state">Loading usage logs...</td></tr>`;
-    openModal(modalKeyDetails);
-
-    // Fetch usage logs
-    try {
-      const { ok, data } = await apiFetch(`/api/admin/keys/${id}/usage?limit=50`);
-      if (!ok || !data.usage || data.usage.length === 0) {
-        detailsUsageTbody.innerHTML = `<tr><td colspan="5" class="empty-state">No requests recorded yet for this key.</td></tr>`;
-        return;
-      }
-
-      detailsUsageTbody.innerHTML = data.usage
-        .map((u) => {
-          const statusClass = u.statusCode >= 200 && u.statusCode < 400 ? 'color: #34d399;' : 'color: #f87171;';
-          return `
-            <tr>
-              <td>${formatDate(u.timestamp)}</td>
-              <td><code class="font-mono">${escapeHtml(u.endpoint)}</code></td>
-              <td><strong style="${statusClass}">${u.statusCode}</strong></td>
-              <td>${u.responseTimeMs} ms</td>
-              <td>${escapeHtml(u.ipAddress || '—')}</td>
-            </tr>
-          `;
-        })
-        .join('');
-    } catch {
-      detailsUsageTbody.innerHTML = `<tr><td colspan="5" class="empty-state">Failed to load request logs.</td></tr>`;
-    }
-  }
-
-  /**
-   * HTML escape helper to prevent XSS
-   */
-  function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
-  // Expose global methods for inline HTML onclick handlers
-  window.adminApp = {
-    openDetails,
-    toggleStatus,
-    openRevoke,
-    openRotate,
-  };
-
-  // Run on startup
+  // Initialize
   checkSession();
-})();
+});

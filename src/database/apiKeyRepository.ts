@@ -7,7 +7,13 @@ import {
   ListKeysOptions,
 } from '../types/apiKey';
 import { config } from '../config';
+import { hashPassword } from '../security/passwordHasher';
 import logger from '../utils/logger';
+
+export interface AdminUserData {
+  username: string;
+  passwordHash: string;
+}
 
 export interface IApiKeyRepository {
   init(): Promise<void>;
@@ -16,9 +22,13 @@ export interface IApiKeyRepository {
   getKeyByHash(hash: string): Promise<ApiKeyRecord | null>;
   listKeys(options?: ListKeysOptions): Promise<{ keys: ApiKeyRecord[]; total: number }>;
   updateKey(id: string, updates: Partial<ApiKeyRecord>): Promise<ApiKeyRecord | null>;
+  deleteKey(id: string): Promise<boolean>;
   recordUsage(usage: ApiKeyUsageRecord, statsDelta: { total: number; success: number; failure: number }): Promise<void>;
   getUsageHistory(keyId: string, limit?: number): Promise<ApiKeyUsageRecord[]>;
   getDashboardStats(): Promise<DashboardStats>;
+  getAdminUser(username: string): Promise<AdminUserData | null>;
+  saveAdminUser(username: string, passwordHash: string): Promise<void>;
+  updateAdminCredentials(oldUsername: string, newUsername: string, newPasswordHash?: string): Promise<void>;
   close?(): Promise<void>;
 }
 
@@ -31,6 +41,17 @@ export function sanitizeKeyRecord(record: ApiKeyRecord): ApiKeyPublic {
 export class MemoryApiKeyRepository implements IApiKeyRepository {
   private keys = new Map<string, ApiKeyRecord>();
   private usage = new Map<string, ApiKeyUsageRecord[]>();
+  private adminUsers = new Map<string, AdminUserData>();
+
+  constructor() {
+    // Seed initial admin user if not present
+    const defaultUser = config.adminUsername || 'inexpert_trifler';
+    const defaultPass = config.adminPassword || 'om sai 0987654321';
+    this.adminUsers.set(defaultUser.toLowerCase(), {
+      username: defaultUser,
+      passwordHash: hashPassword(defaultPass),
+    });
+  }
 
   async init(): Promise<void> {
     // No initialization needed for memory store
@@ -100,6 +121,36 @@ export class MemoryApiKeyRepository implements IApiKeyRepository {
 
     this.keys.set(id, updated);
     return { ...updated };
+  }
+
+  async deleteKey(id: string): Promise<boolean> {
+    const deleted = this.keys.delete(id);
+    this.usage.delete(id);
+    return deleted;
+  }
+
+  async getAdminUser(username: string): Promise<AdminUserData | null> {
+    const user = this.adminUsers.get(username.trim().toLowerCase());
+    return user ? { ...user } : null;
+  }
+
+  async saveAdminUser(username: string, passwordHash: string): Promise<void> {
+    this.adminUsers.set(username.trim().toLowerCase(), {
+      username: username.trim(),
+      passwordHash,
+    });
+  }
+
+  async updateAdminCredentials(oldUsername: string, newUsername: string, newPasswordHash?: string): Promise<void> {
+    const existing = await this.getAdminUser(oldUsername);
+    if (!existing) {
+      throw new Error('Admin user not found.');
+    }
+    this.adminUsers.delete(oldUsername.trim().toLowerCase());
+    this.adminUsers.set(newUsername.trim().toLowerCase(), {
+      username: newUsername.trim(),
+      passwordHash: newPasswordHash || existing.passwordHash,
+    });
   }
 
   async recordUsage(
@@ -235,6 +286,12 @@ export class PostgresApiKeyRepository implements IApiKeyRepository {
         timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS admin_users (
+        username VARCHAR(100) PRIMARY KEY,
+        password_hash VARCHAR(255) NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
       CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
       CREATE INDEX IF NOT EXISTS idx_api_keys_status ON api_keys(status);
       CREATE INDEX IF NOT EXISTS idx_api_key_usage_key_id ON api_key_usage(key_id);
@@ -243,8 +300,22 @@ export class PostgresApiKeyRepository implements IApiKeyRepository {
 
     try {
       await this.pool.query(schemaQuery);
+
+      // Check if admin user exists; seed bootstrap admin if table empty
+      const adminCountRes = await this.pool.query('SELECT COUNT(*) as count FROM admin_users');
+      if (parseInt(adminCountRes.rows[0]?.count || '0', 10) === 0) {
+        const defaultUser = config.adminUsername || 'inexpert_trifler';
+        const defaultPass = config.adminPassword || 'om sai 0987654321';
+        const hashed = hashPassword(defaultPass);
+        await this.pool.query(
+          'INSERT INTO admin_users (username, password_hash, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (username) DO NOTHING',
+          [defaultUser, hashed]
+        );
+        logger.info({ username: defaultUser }, 'Bootstrap administrator credentials initialized in PostgreSQL');
+      }
+
       this.initialized = true;
-      logger.info('PostgreSQL API key tables and indexes verified/initialized');
+      logger.info('PostgreSQL API key and admin tables verified/initialized');
     } catch (err) {
       logger.error({ err }, 'Failed to initialize PostgreSQL API key schema');
       throw err;
@@ -399,6 +470,12 @@ export class PostgresApiKeyRepository implements IApiKeyRepository {
     return this.mapRowToRecord(res.rows[0]);
   }
 
+  async deleteKey(id: string): Promise<boolean> {
+    await this.init();
+    const res = await this.pool.query('DELETE FROM api_keys WHERE id = $1', [id]);
+    return (res.rowCount || 0) > 0;
+  }
+
   async recordUsage(
     usage: ApiKeyUsageRecord,
     statsDelta: { total: number; success: number; failure: number }
@@ -505,6 +582,48 @@ export class PostgresApiKeyRepository implements IApiKeyRepository {
       failedRequests: parseInt(row?.failed_requests || '0', 10),
       recentKeys,
     };
+  }
+
+  async getAdminUser(username: string): Promise<AdminUserData | null> {
+    await this.init();
+    const res = await this.pool.query('SELECT * FROM admin_users WHERE LOWER(username) = LOWER($1)', [username.trim()]);
+    if (res.rows.length === 0) return null;
+    return {
+      username: res.rows[0].username,
+      passwordHash: res.rows[0].password_hash,
+    };
+  }
+
+  async saveAdminUser(username: string, passwordHash: string): Promise<void> {
+    await this.init();
+    const query = `
+      INSERT INTO admin_users (username, password_hash, updated_at)
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (username) DO UPDATE
+      SET password_hash = $2, updated_at = NOW()
+    `;
+    await this.pool.query(query, [username.trim(), passwordHash]);
+  }
+
+  async updateAdminCredentials(oldUsername: string, newUsername: string, newPasswordHash?: string): Promise<void> {
+    await this.init();
+    const existing = await this.getAdminUser(oldUsername);
+    if (!existing) {
+      throw new Error('Admin user not found.');
+    }
+
+    if (oldUsername.trim().toLowerCase() === newUsername.trim().toLowerCase()) {
+      if (newPasswordHash) {
+        await this.pool.query(
+          'UPDATE admin_users SET password_hash = $1, updated_at = NOW() WHERE LOWER(username) = LOWER($2)',
+          [newPasswordHash, oldUsername.trim()]
+        );
+      }
+    } else {
+      const hashToUse = newPasswordHash || existing.passwordHash;
+      await this.pool.query('DELETE FROM admin_users WHERE LOWER(username) = LOWER($1)', [oldUsername.trim()]);
+      await this.saveAdminUser(newUsername, hashToUse);
+    }
   }
 
   async close(): Promise<void> {

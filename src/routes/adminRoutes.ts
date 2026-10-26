@@ -4,6 +4,7 @@ import { AdminAuth } from '../security/adminAuth';
 import { requireAdminAuth } from '../middleware/adminAuthMiddleware';
 import { adminLoginRateLimiter } from '../middleware/rateLimit';
 import { apiKeyService } from '../services/apiKeyService';
+import { config } from '../config';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -14,14 +15,6 @@ const loginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
-// Create Key schema
-const createKeySchema = z.object({
-  projectName: z.string().trim().min(2, 'Project name must be at least 2 characters').max(100),
-  description: z.string().trim().max(500).optional(),
-  expiresAt: z.string().trim().datetime().nullable().optional(),
-  rateLimitPerMinute: z.number().int().min(1).max(10000).nullable().optional(),
-});
-
 // Update Key schema
 const updateKeySchema = z.object({
   projectName: z.string().trim().min(2).max(100).optional(),
@@ -30,10 +23,10 @@ const updateKeySchema = z.object({
 });
 
 /**
- * POST /api/admin/login
+ * POST /api/admin/login and POST /admin/login
  * Authenticates administrator and sets secure HTTP-only cookie + returns session token & CSRF token.
  */
-router.post('/login', adminLoginRateLimiter, (req: Request, res: Response) => {
+router.post(['/login', '/api/login'], adminLoginRateLimiter, async (req: Request, res: Response) => {
   const parseResult = loginSchema.safeParse(req.body);
   if (!parseResult.success) {
     res.status(400).json({
@@ -47,7 +40,7 @@ router.post('/login', adminLoginRateLimiter, (req: Request, res: Response) => {
   }
 
   const { username, password } = parseResult.data;
-  const isValid = AdminAuth.validateCredentials(username, password);
+  const isValid = await AdminAuth.validateCredentials(username, password);
 
   if (!isValid) {
     logger.warn({ username, ip: req.ip }, 'Failed administrator login attempt');
@@ -76,10 +69,10 @@ router.post('/login', adminLoginRateLimiter, (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/admin/logout
+ * POST /api/admin/logout and POST /admin/logout
  * Clears administrator session cookies.
  */
-router.post('/logout', (req: Request, res: Response) => {
+router.post(['/logout', '/api/logout'], (req: Request, res: Response) => {
   AdminAuth.clearSessionCookies(res);
   res.json({
     success: true,
@@ -88,10 +81,19 @@ router.post('/logout', (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/admin/session
+ * GET /api/admin/logout
+ * Browser navigation logout redirect
+ */
+router.get('/logout', (req: Request, res: Response) => {
+  AdminAuth.clearSessionCookies(res);
+  res.redirect('/admin');
+});
+
+/**
+ * GET /api/admin/session and GET /admin/api/session
  * Verifies active session without requiring explicit login credentials.
  */
-router.get('/session', (req: Request, res: Response) => {
+router.get(['/session', '/api/session'], (req: Request, res: Response) => {
   const authHeader = req.headers['authorization'];
   let token: string | null = null;
   if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
@@ -114,7 +116,7 @@ router.get('/session', (req: Request, res: Response) => {
 
   res.json({
     authenticated: true,
-    user: { username: verification.username },
+    user: { username: verification.username, role: 'main_admin' },
     csrfToken: verification.csrfToken,
   });
 });
@@ -123,10 +125,59 @@ router.get('/session', (req: Request, res: Response) => {
 router.use(requireAdminAuth);
 
 /**
- * GET /api/admin/dashboard
+ * POST /api/admin/account/update and /admin/api/account/update
+ * Updates administrator account credentials (username and/or password) with current password verification.
+ */
+router.post(['/account/update', '/api/account/update'], async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const currentUsername = req.adminUser?.username || config.adminUsername;
+    const currentPassword = req.body.current_password || req.body.currentPassword;
+    const newUsername = req.body.new_username || req.body.newUsername;
+    const newPassword = req.body.new_password || req.body.newPassword;
+
+    if (!currentPassword) {
+      res.status(400).json({
+        success: false,
+        error: 'Current password is required to save account changes.',
+      });
+      return;
+    }
+
+    const updateResult = await AdminAuth.updateCredentials(
+      currentUsername,
+      currentPassword,
+      newUsername,
+      newPassword
+    );
+
+    if (!updateResult.success) {
+      res.status(400).json({
+        success: false,
+        error: updateResult.message,
+      });
+      return;
+    }
+
+    const effectiveUsername = updateResult.username || currentUsername;
+    const session = AdminAuth.createSession(effectiveUsername);
+    AdminAuth.setSessionCookies(res, session.token, session.csrfToken);
+
+    res.json({
+      success: true,
+      message: updateResult.message,
+      username: effectiveUsername,
+      csrfToken: session.csrfToken,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/admin/dashboard and /admin/api/dashboard
  * Aggregated metrics and overview statistics.
  */
-router.get('/dashboard', async (_req: Request, res: Response, next: NextFunction) => {
+router.get(['/dashboard', '/api/dashboard'], async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const stats = await apiKeyService.getDashboardMetrics();
     res.json({
@@ -139,10 +190,10 @@ router.get('/dashboard', async (_req: Request, res: Response, next: NextFunction
 });
 
 /**
- * GET /api/admin/keys
- * Lists managed API keys with optional search, status filtering, and pagination.
+ * GET /api/admin/keys and /admin/api/client-keys
+ * Lists managed API keys formatted for both standard API and reference UI.
  */
-router.get('/keys', async (req: Request, res: Response, next: NextFunction) => {
+router.get(['/keys', '/client-keys', '/api/client-keys'], async (req: Request, res: Response, next: NextFunction) => {
   try {
     const search = typeof req.query.search === 'string' ? req.query.search : undefined;
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
@@ -150,9 +201,19 @@ router.get('/keys', async (req: Request, res: Response, next: NextFunction) => {
     const offset = req.query.offset ? Math.max(0, parseInt(String(req.query.offset), 10)) : 0;
 
     const result = await apiKeyService.listKeys({ search, status, limit, offset });
+
+    const mappedKeys = result.keys.map(k => ({
+      ...k,
+      name: k.projectName,
+      api_key: k.keyPrefix,
+      is_active: k.status === 'active',
+      requests_count: k.totalRequests,
+      rate_limit_per_minute: k.rateLimitPerMinute || 60,
+    }));
+
     res.json({
       success: true,
-      keys: result.keys,
+      keys: mappedKeys,
       total: result.total,
       limit,
       offset,
@@ -163,29 +224,45 @@ router.get('/keys', async (req: Request, res: Response, next: NextFunction) => {
 });
 
 /**
- * POST /api/admin/keys
+ * POST /api/admin/keys and /admin/api/client-keys
  * Generates a new API key. Plaintext key secret is returned ONCE.
  */
-router.post('/keys', async (req: Request, res: Response, next: NextFunction) => {
+router.post(['/keys', '/client-keys', '/api/client-keys'], async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const parseResult = createKeySchema.safeParse(req.body);
-    if (!parseResult.success) {
+    const projectName = req.body.name || req.body.projectName;
+    const description = req.body.description || '';
+    const rateLimit = req.body.rate_limit_per_minute !== undefined ? req.body.rate_limit_per_minute : req.body.rateLimitPerMinute;
+    const expiresAt = req.body.expiresAt || null;
+
+    if (!projectName || typeof projectName !== 'string' || projectName.trim().length < 2) {
       res.status(400).json({
         success: false,
         error: {
           code: 'VALIDATION_ERROR',
-          message: parseResult.error.errors[0]?.message || 'Invalid input data.',
+          message: 'Project or application name must be at least 2 characters long.',
         },
       });
       return;
     }
 
-    const { key, record } = await apiKeyService.createKey(parseResult.data);
+    const { key, record } = await apiKeyService.createKey({
+      projectName: projectName.trim(),
+      description: typeof description === 'string' ? description.trim() : undefined,
+      expiresAt: typeof expiresAt === 'string' ? expiresAt : undefined,
+      rateLimitPerMinute: rateLimit ? Number(rateLimit) : null,
+    });
+
     res.status(201).json({
       success: true,
       message: 'API key generated successfully. Copy the secret now; it will never be displayed again.',
       key, // Plaintext secret returned ONCE
-      record,
+      record: {
+        ...record,
+        name: record.projectName,
+        api_key: record.keyPrefix,
+        is_active: record.status === 'active',
+        requests_count: record.totalRequests,
+      },
     });
   } catch (err) {
     next(err);
@@ -206,7 +283,16 @@ router.get('/keys/:id', async (req: Request, res: Response, next: NextFunction) 
       });
       return;
     }
-    res.json({ success: true, key: record });
+    res.json({
+      success: true,
+      key: {
+        ...record,
+        name: record.projectName,
+        api_key: record.keyPrefix,
+        is_active: record.status === 'active',
+        requests_count: record.totalRequests,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -257,6 +343,30 @@ router.patch('/keys/:id', async (req: Request, res: Response, next: NextFunction
 });
 
 /**
+ * POST /api/admin/keys/:id/toggle and /admin/api/client-keys/:id/toggle
+ */
+router.post(['/keys/:id/toggle', '/client-keys/:id/toggle', '/api/client-keys/:id/toggle'], async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const key = await apiKeyService.getKeyById(req.params.id);
+    if (!key) {
+      res.status(404).json({ success: false, error: 'API key not found.' });
+      return;
+    }
+
+    const newStatus = key.status === 'active' ? 'disabled' : 'active';
+    const updated = await apiKeyService.updateKey(req.params.id, { status: newStatus });
+
+    res.json({
+      success: true,
+      message: `API key ${newStatus === 'active' ? 'activated' : 'revoked'} successfully.`,
+      key: updated,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * POST /api/admin/keys/:id/revoke
  * Permanently invalidates an API key.
  */
@@ -302,6 +412,30 @@ router.post('/keys/:id/rotate', async (req: Request, res: Response, next: NextFu
       });
       return;
     }
+    next(err);
+  }
+});
+
+/**
+ * DELETE /api/admin/keys/:id and DELETE /admin/api/client-keys/:id
+ * Permanently deletes an API key.
+ */
+router.delete(['/keys/:id', '/client-keys/:id', '/api/client-keys/:id'], async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const deleted = await apiKeyService.deleteKey(req.params.id);
+    if (!deleted) {
+      res.status(404).json({
+        success: false,
+        error: 'API key not found.',
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      message: 'API key deleted successfully.',
+    });
+  } catch (err) {
     next(err);
   }
 });

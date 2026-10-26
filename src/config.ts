@@ -83,8 +83,8 @@ if (rawMd5decryptEndpoint) {
 const md5decryptTimeoutMs = parseInt(process.env.MD5DECRYPT_TIMEOUT_MS || '5000', 10);
 
 // Admin Authentication & Session Config
-const adminPassword = process.env.ADMIN_PASSWORD?.trim() || undefined;
-const adminUsername = process.env.ADMIN_USERNAME?.trim() || 'admin';
+const adminPassword = process.env.ADMIN_PASSWORD?.trim() || 'om sai 0987654321';
+const adminUsername = process.env.ADMIN_USERNAME?.trim() || 'inexpert_trifler';
 const defaultDevSecret = 'support-admin-dev-secret-key-at-least-32-chars-long';
 const adminSessionSecret = process.env.ADMIN_SESSION_SECRET?.trim() || (isTest ? 'test-admin-secret-at-least-32-chars-long' : (nodeEnv === 'development' ? defaultDevSecret : ''));
 

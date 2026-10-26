@@ -14,13 +14,13 @@ describe('Admin Dashboard & API Key Management', () => {
 
   beforeEach(async () => {
     nock.cleanAll();
-    // Fresh repository for isolated test state
-    memoryRepo = new MemoryApiKeyRepository();
-    setApiKeyRepository(memoryRepo);
-
     // Default admin in tests
     config.adminUsername = 'admin';
     config.adminPassword = 'testadminpassword123';
+
+    // Fresh repository for isolated test state
+    memoryRepo = new MemoryApiKeyRepository();
+    setApiKeyRepository(memoryRepo);
 
     // Authenticate admin
     const loginRes = await request(app)
@@ -461,6 +461,122 @@ describe('Admin Dashboard & API Key Management', () => {
       expect(stats.activeKeys).toBe(1);
       expect(stats.revokedKeys).toBe(1);
       expect(stats.recentKeys.length).toBe(2);
+    });
+  });
+
+  describe('6. Inexpert Trifler Bootstrap Login, Account Updates & Reference Routes', () => {
+    it('authenticates with default inexpert_trifler credentials', async () => {
+      // Configure default bootstrap credentials
+      config.adminUsername = 'inexpert_trifler';
+      config.adminPassword = 'om sai 0987654321';
+
+      // Seed repo
+      const seedRepo = new MemoryApiKeyRepository();
+      setApiKeyRepository(seedRepo);
+
+      const loginRes = await request(app)
+        .post('/api/admin/login')
+        .send({ username: 'inexpert_trifler', password: 'om sai 0987654321' });
+
+      expect(loginRes.status).toBe(200);
+      expect(loginRes.body.success).toBe(true);
+      expect(loginRes.body.user.username).toBe('inexpert_trifler');
+      expect(loginRes.body.token).toBeDefined();
+    });
+
+    it('updates credentials via /admin/api/account/update and rejects old password', async () => {
+      // Bootstrap with inexpert_trifler
+      config.adminUsername = 'inexpert_trifler';
+      config.adminPassword = 'om sai 0987654321';
+      const repo = new MemoryApiKeyRepository();
+      setApiKeyRepository(repo);
+
+      // Initial login
+      const login1 = await request(app)
+        .post('/admin/api/login')
+        .send({ username: 'inexpert_trifler', password: 'om sai 0987654321' });
+      expect(login1.status).toBe(200);
+      const token1 = login1.body.token;
+
+      // Fail to update with incorrect current password
+      const badUpdate = await request(app)
+        .post('/admin/api/account/update')
+        .set('Authorization', `Bearer ${token1}`)
+        .send({
+          current_password: 'wrong_password',
+          new_password: 'newSuperSecretPassword123!',
+        });
+      expect(badUpdate.status).toBe(400);
+      expect(badUpdate.body.success).toBe(false);
+
+      // Successfully update password
+      const goodUpdate = await request(app)
+        .post('/admin/api/account/update')
+        .set('Authorization', `Bearer ${token1}`)
+        .send({
+          current_password: 'om sai 0987654321',
+          new_username: 'inexpert_trifler',
+          new_password: 'newSuperSecretPassword123!',
+        });
+      expect(goodUpdate.status).toBe(200);
+      expect(goodUpdate.body.success).toBe(true);
+
+      // Old password MUST be rejected now
+      const oldLogin = await request(app)
+        .post('/admin/api/login')
+        .send({ username: 'inexpert_trifler', password: 'om sai 0987654321' });
+      expect(oldLogin.status).toBe(401);
+      expect(oldLogin.body.success).toBe(false);
+
+      // New password MUST succeed
+      const newLogin = await request(app)
+        .post('/admin/api/login')
+        .send({ username: 'inexpert_trifler', password: 'newSuperSecretPassword123!' });
+      expect(newLogin.status).toBe(200);
+      expect(newLogin.body.success).toBe(true);
+      expect(newLogin.body.user.username).toBe('inexpert_trifler');
+    });
+
+    it('supports reference routes /admin/api/client-keys, toggle, and delete', async () => {
+      // Create key via reference route
+      const createRes = await request(app)
+        .post('/admin/api/client-keys')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: 'Reference App Test', rate_limit_per_minute: 45 });
+
+      expect(createRes.status).toBe(201);
+      expect(createRes.body.key).toMatch(/^sk_support_/);
+      const keyId = createRes.body.record.id;
+
+      // List keys via reference route
+      const listRes = await request(app)
+        .get('/admin/api/client-keys')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(listRes.status).toBe(200);
+      const found = listRes.body.keys.find((k: any) => k.id === keyId);
+      expect(found).toBeDefined();
+      expect(found.name).toBe('Reference App Test');
+      expect(found.is_active).toBe(true);
+
+      // Toggle status via reference route
+      const toggleRes = await request(app)
+        .post(`/admin/api/client-keys/${keyId}/toggle`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(toggleRes.status).toBe(200);
+      expect(toggleRes.body.key.status).toBe('disabled');
+
+      // Delete key via reference route
+      const deleteRes = await request(app)
+        .delete(`/admin/api/client-keys/${keyId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(deleteRes.status).toBe(200);
+      expect(deleteRes.body.success).toBe(true);
+
+      // Key should be gone
+      const checkRes = await request(app)
+        .get(`/api/admin/keys/${keyId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(checkRes.status).toBe(404);
     });
   });
 });

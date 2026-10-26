@@ -57,6 +57,34 @@ body {
   font-family: var(--font-mono);
 }
 
+.settings-link {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+  z-index: 50;
+  border: 1px solid transparent;
+}
+
+.settings-link:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-card);
+  border-color: var(--border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.settings-link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
 .page-layout {
   max-width: 960px;
   margin: 0 auto;

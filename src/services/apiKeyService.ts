@@ -176,6 +176,14 @@ export class ApiKeyService {
   }
 
   /**
+   * Permanently deletes an API key.
+   */
+  public async deleteKey(id: string): Promise<boolean> {
+    const repo = getApiKeyRepository();
+    return repo.deleteKey(id);
+  }
+
+  /**
    * Rotates an API key: permanently revokes the existing key and generates a replacement.
    * Returns the new plaintext key ONCE.
    */

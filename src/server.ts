@@ -35,6 +35,7 @@ app.use(cookieParser());
 
 // Mount Admin Management Routes
 app.use('/api/admin', adminRoutes);
+app.use('/admin/api', adminRoutes);
 
 // Apply general rate limiter to /api
 app.use('/api', apiRateLimiter);

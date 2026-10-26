@@ -1,6 +1,8 @@
 import crypto from 'crypto';
 import { Response } from 'express';
 import { config } from '../config';
+import { getApiKeyRepository } from '../database/apiKeyRepository';
+import { hashPassword, verifyPassword } from './passwordHasher';
 import logger from '../utils/logger';
 
 export interface SessionPayload {
@@ -20,37 +22,79 @@ const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export class AdminAuth {
   /**
-   * Securely validates credentials using constant-time comparison.
+   * Securely validates credentials using PBKDF2 hashes or bootstrap credentials.
    */
-  public static validateCredentials(username?: string, password?: string): boolean {
+  public static async validateCredentials(username?: string, password?: string): Promise<boolean> {
     if (!username || !password) {
       return false;
     }
 
-    const expectedUser = config.adminUsername;
-    let expectedPass = config.adminPassword;
+    try {
+      const repo = getApiKeyRepository();
+      const adminUser = await repo.getAdminUser(username);
 
-    // In non-production environments (dev/test), fallback to 'admin123' if unset
-    if (!expectedPass) {
-      if (config.nodeEnv === 'production') {
-        logger.error('ADMIN_PASSWORD is not configured in production environment. Admin login disabled.');
-        return false;
+      if (adminUser) {
+        return verifyPassword(password, adminUser.passwordHash);
       }
-      expectedPass = 'admin123';
-    }
 
-    const userMatch = username.trim() === expectedUser;
-    
-    // Constant-time string comparison for password
-    const userPassBuf = Buffer.from(password.trim());
-    const expectedPassBuf = Buffer.from(expectedPass);
+      // Bootstrap fallback if user not in DB yet
+      const bootstrapUser = config.adminUsername || 'inexpert_trifler';
+      const bootstrapPass = config.adminPassword || 'om sai 0987654321';
 
-    if (userPassBuf.length !== expectedPassBuf.length) {
+      if (username.trim().toLowerCase() === bootstrapUser.toLowerCase() && password === bootstrapPass) {
+        try {
+          await repo.saveAdminUser(bootstrapUser, hashPassword(bootstrapPass));
+        } catch (e) {
+          logger.warn({ err: e }, 'Could not persist bootstrap user on initial login');
+        }
+        return true;
+      }
+
+      return false;
+    } catch (err) {
+      logger.error({ err }, 'Error validating administrator credentials');
       return false;
     }
+  }
 
-    const passMatch = crypto.timingSafeEqual(userPassBuf, expectedPassBuf);
-    return userMatch && passMatch;
+  /**
+   * Updates administrator credentials (username and/or password).
+   */
+  public static async updateCredentials(
+    currentUsername: string,
+    currentPassword: string,
+    newUsername?: string,
+    newPassword?: string
+  ): Promise<{ success: boolean; message: string; username?: string; error?: string }> {
+    const isValid = await this.validateCredentials(currentUsername, currentPassword);
+    if (!isValid) {
+      return { success: false, message: 'Current password is incorrect.', error: 'Current password is incorrect.' };
+    }
+
+    const targetUsername = (newUsername && newUsername.trim()) ? newUsername.trim() : currentUsername;
+    let targetPasswordHash: string | undefined = undefined;
+
+    if (newPassword && newPassword.trim()) {
+      if (newPassword.trim().length < 6) {
+        return {
+          success: false,
+          message: 'New password must be at least 6 characters long.',
+          error: 'New password must be at least 6 characters long.',
+        };
+      }
+      targetPasswordHash = hashPassword(newPassword.trim());
+    }
+
+    const repo = getApiKeyRepository();
+    await repo.updateAdminCredentials(currentUsername, targetUsername, targetPasswordHash);
+
+    logger.info({ oldUser: currentUsername, newUser: targetUsername }, 'Administrator account credentials updated');
+
+    return {
+      success: true,
+      message: 'Account credentials updated successfully.',
+      username: targetUsername,
+    };
   }
 
   /**
