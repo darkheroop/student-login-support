@@ -141,6 +141,11 @@ export async function runLoginDiagnostics(
     const rawUsername = userDetails?.username;
     const rawPassword = userDetails?.password;
 
+    // Preserve the exact password hash returned by the authorized upstream lookup
+    const passwordHash = (rawPassword !== undefined && rawPassword !== null && rawPassword !== '')
+      ? String(rawPassword)
+      : undefined;
+
     let credentialDiagnostic: CredentialDiagnostic | undefined = undefined;
     if (rawPassword !== undefined && rawPassword !== null && rawPassword !== '') {
       const hashStr = String(rawPassword).trim();
@@ -208,21 +213,30 @@ export async function runLoginDiagnostics(
       userType?.toLowerCase() === 'test_student'
     );
 
-    // Resolve credential via institutional recovery service interface if hash is present
-    const credentialRecovery = await resolveCredential(
-      rawPassword,
-      {
-        username: rawUsername,
-        userId: userDetails?.userId ? String(userDetails.userId) : undefined,
-        userType,
-        isTestAccount,
-      },
-      effectiveAdapter
-    );
+    let hasPlaintext = false;
 
-    // If upstream student record succeeded, refine stage to the credential recovery outcome
-    if (rawUsername && rawPassword) {
-      stage = credentialRecovery.stageDiagnostic || (credentialRecovery.hasPlaintext ? 'RECOVERY_SUCCESS' : 'RECOVERY_NOT_CONFIGURED');
+    // Only invoke credential recovery adapter if an adapter is explicitly configured and hash exists
+    if (effectiveAdapter && rawPassword) {
+      try {
+        const credentialRecovery = await resolveCredential(
+          rawPassword,
+          {
+            username: rawUsername,
+            userId: userDetails?.userId ? String(userDetails.userId) : undefined,
+            userType,
+            isTestAccount,
+          },
+          effectiveAdapter
+        );
+        hasPlaintext = credentialRecovery.hasPlaintext;
+        if (rawUsername && rawPassword) {
+          stage = credentialRecovery.stageDiagnostic || (credentialRecovery.hasPlaintext ? 'RECOVERY_SUCCESS' : 'RECOVERY_NOT_CONFIGURED');
+        }
+      } catch (recoveryErr) {
+        logger.warn({ err: recoveryErr }, 'Recovery adapter error during diagnostic evaluation');
+      }
+    } else if (rawUsername && rawPassword) {
+      stage = 'RECOVERY_NOT_CONFIGURED';
     }
 
     // Safe structured developer audit log (NEVER logs passwords, raw hashes, session tokens, or sensitive payloads)
@@ -231,7 +245,7 @@ export async function runLoginDiagnostics(
         requestId: runId,
         stage,
         durationMs,
-        hasPlaintext: credentialRecovery.hasPlaintext,
+        hasPlaintext,
         adapterConfigured: Boolean(effectiveAdapter),
         upstreamStatus: event.status,
       },
@@ -267,7 +281,7 @@ export async function runLoginDiagnostics(
     return {
       success: true,
       username: rawUsername || 'UNKNOWN',
-      password: credentialRecovery.passwordResult,
+      password: passwordHash,
       diagnostics: result,
     };
 

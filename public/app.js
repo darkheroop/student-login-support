@@ -95,7 +95,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderResult(username, password) {
     outputUsername.textContent = username || '-';
-    outputPassword.textContent = password || 'No credential available';
+    outputPassword.textContent = (password && typeof password === 'string' && password.trim())
+      ? password
+      : 'Password hash unavailable';
     resultsCard.hidden = false;
     errorCard.hidden = true;
     loadingCard.hidden = true;

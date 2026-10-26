@@ -98,10 +98,10 @@ describe('Student Login Support - Single-Page Workflow Test Suite', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
 
-    // Verify minimal authorized response contract (username and authorized password result only)
+    // Verify minimal authorized response contract (username and authorized password hash)
     expect(res.body.username).toBe('student_username');
-    expect(res.body.password).toBe('Credential recovery service not configured (MD5DECRYPT_API_KEY missing)');
-    expect(res.body.password).not.toBe('337b2ac65e5bb92c1f49b6b76b0788b3'); // Not treated as plaintext
+    expect(res.body.password).toBe('337b2ac65e5bb92c1f49b6b76b0788b3'); // Exact password hash returned directly
+    expect(res.body.password).not.toContain('Credential recovery service not configured'); // Errors never returned as password
 
     // Verify extracted student username
     expect(res.body.diagnostics.student).toBeDefined();
@@ -546,7 +546,7 @@ describe('Student Login Support - Single-Page Workflow Test Suite', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.username).toBe('akshay');
-      expect(res.body.password).toBe('apbvq'); // Exact plaintext extracted
+      expect(res.body.password).toBe(sampleHash); // Exact password hash preserved without altering
       expect(res.body.diagnostics.stageDiagnostic).toBe('RECOVERY_SUCCESS');
     });
 
@@ -577,7 +577,8 @@ describe('Student Login Support - Single-Page Workflow Test Suite', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.username).toBe('akshay');
-      expect(res.body.password).toBe('Recovery service provider request failed');
+      // Backend errors must NEVER be displayed as password values; exact hash is preserved
+      expect(res.body.password).toBe(sampleHash);
       expect(res.body.diagnostics.stageDiagnostic).toBe('RECOVERY_REJECTED');
     });
 
@@ -609,7 +610,8 @@ describe('Student Login Support - Single-Page Workflow Test Suite', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.username).toBe('akshay');
-      expect(res.body.password).toBe('Recovery service request timed out');
+      // Backend timeout errors must NEVER replace password hash
+      expect(res.body.password).toBe(sampleHash);
       expect(res.body.diagnostics.stageDiagnostic).toBe('RECOVERY_TIMEOUT');
     });
 
@@ -921,6 +923,98 @@ describe('Student Login Support - Single-Page Workflow Test Suite', () => {
       expect(result.hasPlaintext).toBe(false);
       expect(result.passwordResult).toContain('SSPR reset required');
       expect(result.passwordResult).not.toBe('real_student_recovered_secret'); // Plaintext is NOT exposed for real students
+    });
+  });
+
+  describe('Password Hash Direct Display Guarantee', () => {
+    it('returns exact upstream hash when MD5DECRYPT_API_KEY is not set', async () => {
+      config.md5decryptApiKey = undefined;
+      config.supportRecoveryEndpoint = undefined;
+
+      const exactUpstreamHash = '337b2ac65e5bb92c1f49b6b76b0788b3';
+
+      nock('https://edunova.abes.ac.in')
+        .get('/sims-services/digitalsims/')
+        .query(true)
+        .reply(200, {
+          collection: {
+            response: {
+              statusMsg: 'SUCCESS',
+              userDetails: {
+                username: 'akshay',
+                password: exactUpstreamHash,
+                userId: '149',
+              },
+            },
+          },
+        });
+
+      const res = await request(app)
+        .post('/api/support/login-diagnostics')
+        .send({ studentNumber: '9599099932' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.username).toBe('akshay');
+      expect(res.body.password).toBe(exactUpstreamHash);
+      expect(res.body.password).not.toContain('Credential recovery service not configured');
+    });
+
+    it('preserves hash characters and case without modification', async () => {
+      config.md5decryptApiKey = undefined;
+      config.supportRecoveryEndpoint = undefined;
+
+      const mixedCaseHash = 'A1B2c3D4e5F60718293a4b5c6d7e8f90';
+
+      nock('https://edunova.abes.ac.in')
+        .get('/sims-services/digitalsims/')
+        .query(true)
+        .reply(200, {
+          collection: {
+            response: {
+              statusMsg: 'SUCCESS',
+              userDetails: {
+                username: 'mixed_student',
+                password: mixedCaseHash,
+              },
+            },
+          },
+        });
+
+      const res = await request(app)
+        .post('/api/support/login-diagnostics')
+        .send({ studentNumber: '9599099932' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.password).toBe(mixedCaseHash);
+    });
+
+    it('handles genuinely absent password hash gracefully as undefined', async () => {
+      config.md5decryptApiKey = undefined;
+      config.supportRecoveryEndpoint = undefined;
+
+      nock('https://edunova.abes.ac.in')
+        .get('/sims-services/digitalsims/')
+        .query(true)
+        .reply(200, {
+          collection: {
+            response: {
+              statusMsg: 'SUCCESS',
+              userDetails: {
+                username: 'no_password_student',
+                // password omitted
+              },
+            },
+          },
+        });
+
+      const res = await request(app)
+        .post('/api/support/login-diagnostics')
+        .send({ studentNumber: '9599099932' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.username).toBe('no_password_student');
+      expect(res.body.password).toBeUndefined();
     });
   });
 });
