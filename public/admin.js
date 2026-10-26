@@ -127,18 +127,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── Views Management ────────────────────────────────────────────────
   function showLoginView() {
-    viewLogin.hidden = false;
-    viewDashboard.hidden = true;
+    if (viewDashboard) {
+      viewDashboard.classList.add('hidden');
+      viewDashboard.setAttribute('hidden', '');
+      viewDashboard.style.display = 'none';
+    }
+    if (viewLogin) {
+      viewLogin.classList.remove('hidden');
+      viewLogin.removeAttribute('hidden');
+      viewLogin.style.display = 'flex';
+    }
+    window.scrollTo(0, 0);
     currentUser = null;
     csrfToken = null;
+
+    // If on /admin/dashboard or subpath while not logged in, redirect to /admin
+    const currentPath = window.location.pathname.replace(/\/+$/, '') || '/admin';
+    if (currentPath.includes('/dashboard')) {
+      window.location.replace('/admin');
+    }
   }
 
   function showDashboardView(username) {
-    viewLogin.hidden = true;
-    viewDashboard.hidden = false;
+    if (viewLogin) {
+      viewLogin.classList.add('hidden');
+      viewLogin.setAttribute('hidden', '');
+      viewLogin.style.display = 'none';
+    }
+    if (viewDashboard) {
+      viewDashboard.classList.remove('hidden');
+      viewDashboard.removeAttribute('hidden');
+      viewDashboard.style.display = 'block';
+    }
+    window.scrollTo(0, 0);
     currentUser = username;
     if (headerUsername) headerUsername.textContent = username;
     if (accNewUsername) accNewUsername.value = username;
+
+    // Ensure URL is /admin/dashboard when authenticated
+    const currentPath = window.location.pathname.replace(/\/+$/, '') || '/admin';
+    if (!currentPath.includes('/dashboard')) {
+      window.history.replaceState(null, '', '/admin/dashboard');
+    }
 
     loadDashboardMetrics();
     loadClientKeys();
@@ -182,7 +212,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (res.ok && data.success) {
         csrfToken = data.csrfToken;
         inputPassword.value = '';
-        showDashboardView(data.user.username);
+        // Navigate to the Dashboard as a clean new page
+        window.location.replace('/admin/dashboard');
       } else {
         const msg = data.error?.message || 'Invalid username or password.';
         if (loginError) {
@@ -206,7 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       await apiFetch('/api/admin/logout', { method: 'POST' });
     } finally {
-      showLoginView();
+      window.location.replace('/admin');
     }
   });
 

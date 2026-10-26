@@ -45,6 +45,22 @@
   --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
+/* ── Universal Visibility Rules ────────────────────────────────────── */
+[hidden],
+.hidden {
+  display: none !important;
+}
+
+.login-wrapper.hidden,
+.login-wrapper[hidden] {
+  display: none !important;
+}
+
+.admin-wrapper.hidden,
+.admin-wrapper[hidden] {
+  display: none !important;
+}
+
 body {
   background-color: var(--bg-page);
   color: var(--text-main);

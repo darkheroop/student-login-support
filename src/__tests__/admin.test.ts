@@ -579,4 +579,30 @@ describe('Admin Dashboard & API Key Management', () => {
       expect(checkRes.status).toBe(404);
     });
   });
+
+  describe('7. Admin Page Routing & Viewport Isolation', () => {
+    it('serves admin.html for GET /admin', async () => {
+      const res = await request(app).get('/admin');
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('text/html');
+      expect(res.text).toContain('id="view-login"');
+      expect(res.text).toContain('id="view-dashboard"');
+    });
+
+    it('serves admin.html for GET /admin/dashboard as a dedicated page', async () => {
+      const res = await request(app).get('/admin/dashboard');
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('text/html');
+      expect(res.text).toContain('Admin Dashboard — Student Login Support');
+      expect(res.text).toContain('id="view-dashboard"');
+    });
+
+    it('ensures view-login and view-dashboard initialize hidden with explicit styling', async () => {
+      const res = await request(app).get('/admin');
+      expect(res.status).toBe(200);
+      // Both views must have hidden attributes so they cannot render simultaneously
+      expect(res.text).toMatch(/id="view-login"[^>]*hidden/);
+      expect(res.text).toMatch(/id="view-dashboard"[^>]*hidden/);
+    });
+  });
 });
