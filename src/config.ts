@@ -4,6 +4,7 @@ dotenv.config();
 export interface Config {
   port: number;
   nodeEnv: string;
+  isProduction: boolean;
   corsOrigin: string;
   upstreamBaseUrl: string;
   upstreamTimeoutMs: number;
@@ -88,8 +89,28 @@ const adminUsername = process.env.ADMIN_USERNAME?.trim() || 'inexpert_trifler';
 const defaultDevSecret = 'support-admin-dev-secret-key-at-least-32-chars-long';
 const adminSessionSecret = process.env.ADMIN_SESSION_SECRET?.trim() || (isTest ? 'test-admin-secret-at-least-32-chars-long' : (nodeEnv === 'development' ? defaultDevSecret : ''));
 
-// Database persistence config (PostgreSQL via DATABASE_URL or POSTGRES_URL)
-const databaseUrl = process.env.DATABASE_URL?.trim() || process.env.POSTGRES_URL?.trim() || undefined;
+// Database persistence config (Neon PostgreSQL via DATABASE_URL or related pooler variables)
+export function resolveDatabaseUrl(): string | undefined {
+  const candidates = [
+    process.env.DATABASE_URL,
+    process.env.POSTGRES_URL,
+    process.env.DATABASE_POSTGRES_URL,
+    process.env.POSTGRES_PRISMA_URL,
+    process.env.DATABASE_URL_UNPOOLED,
+    process.env.POSTGRES_URL_NON_POOLING,
+  ];
+
+  for (const c of candidates) {
+    const trimmed = c?.trim();
+    if (trimmed && (trimmed.startsWith('postgres://') || trimmed.startsWith('postgresql://'))) {
+      return trimmed;
+    }
+  }
+  return undefined;
+}
+
+const databaseUrl = resolveDatabaseUrl();
+const isProduction = nodeEnv === 'production' || Boolean(process.env.VERCEL);
 
 // Legacy API Key for backward compatibility
 const supportApiKey = process.env.SUPPORT_API_KEY?.trim() || undefined;
@@ -97,6 +118,7 @@ const supportApiKey = process.env.SUPPORT_API_KEY?.trim() || undefined;
 export const config: Config = {
   port: parseInt(process.env.PORT || '4000', 10),
   nodeEnv,
+  isProduction,
   corsOrigin: process.env.CORS_ORIGIN || '*',
   upstreamBaseUrl,
   upstreamTimeoutMs: parseInt(process.env.UPSTREAM_TIMEOUT_MS || '15000', 10),

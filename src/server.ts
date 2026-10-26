@@ -12,6 +12,7 @@ import { apiRateLimiter } from './middleware/rateLimit';
 import { errorHandler } from './middleware/errorHandler';
 import { apiKeyAuth } from './middleware/apiKeyAuth';
 import { runLoginDiagnostics } from './services/diagnosticsService';
+import { getApiKeyRepository, maskConnectionString } from './database/apiKeyRepository';
 import adminRoutes from './routes/adminRoutes';
 
 export const app = express();
@@ -121,6 +122,20 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   app.listen(config.port, '0.0.0.0', () => {
     logger.info(`Student Login Diagnostic service listening on port ${config.port}`);
     logger.info(`Configured upstream service: ${config.upstreamBaseUrl}`);
+    if (config.databaseUrl) {
+      logger.info(`Database persistence: Neon PostgreSQL CONFIGURED (${maskConnectionString(config.databaseUrl)})`);
+      getApiKeyRepository()
+        .init()
+        .then(() => {
+          logger.info('Neon PostgreSQL tables and connection verified successfully');
+        })
+        .catch(err => {
+          logger.error({ err }, 'Failed initial database connection verification');
+        });
+    } else {
+      logger.info('Database persistence: In-Memory (DATABASE_URL not configured)');
+    }
+
     if (config.md5decryptApiKey) {
       logger.info(`MD5Decrypt API integration: CONFIGURED (endpoint: ${config.md5decryptApiEndpoint})`);
     } else if (config.supportRecoveryEndpoint) {

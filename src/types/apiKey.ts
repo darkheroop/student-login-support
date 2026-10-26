@@ -2,6 +2,7 @@ export type ApiKeyStatus = 'active' | 'disabled' | 'revoked' | 'expired';
 
 export interface ApiKeyRecord {
   id: string;
+  name?: string;
   projectName: string;
   description: string;
   keyPrefix: string;
@@ -10,6 +11,7 @@ export interface ApiKeyRecord {
   createdAt: string;
   updatedAt: string;
   expiresAt: string | null;
+  revokedAt?: string | null;
   lastUsedAt: string | null;
   rateLimitPerMinute: number | null;
   totalRequests: number;

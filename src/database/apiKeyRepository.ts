@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import {
   ApiKeyRecord,
   ApiKeyPublic,
@@ -23,6 +23,7 @@ export interface IApiKeyRepository {
   listKeys(options?: ListKeysOptions): Promise<{ keys: ApiKeyRecord[]; total: number }>;
   updateKey(id: string, updates: Partial<ApiKeyRecord>): Promise<ApiKeyRecord | null>;
   deleteKey(id: string): Promise<boolean>;
+  rotateKey?(oldId: string, newRecord: ApiKeyRecord): Promise<void>;
   recordUsage(usage: ApiKeyUsageRecord, statsDelta: { total: number; success: number; failure: number }): Promise<void>;
   getUsageHistory(keyId: string, limit?: number): Promise<ApiKeyUsageRecord[]>;
   getDashboardStats(): Promise<DashboardStats>;
@@ -32,12 +33,31 @@ export interface IApiKeyRepository {
   close?(): Promise<void>;
 }
 
+/**
+ * Sanitizes an API key record by removing keyHash before transmitting to clients.
+ */
 export function sanitizeKeyRecord(record: ApiKeyRecord): ApiKeyPublic {
   const { keyHash: _hash, ...sanitized } = record;
   return sanitized;
 }
 
-// In-Memory Repository for local dev without Postgres / testing
+/**
+ * Masks sensitive passwords inside database connection strings to prevent credential leaks in logs.
+ */
+export function maskConnectionString(url?: string): string {
+  if (!url) return '[NOT CONFIGURED]';
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) {
+      parsed.password = '***';
+    }
+    return parsed.toString();
+  } catch {
+    return '[CONFIGURED (masked)]';
+  }
+}
+
+// In-Memory Repository for local dev without Postgres / isolated testing
 export class MemoryApiKeyRepository implements IApiKeyRepository {
   private keys = new Map<string, ApiKeyRecord>();
   private usage = new Map<string, ApiKeyUsageRecord[]>();
@@ -54,7 +74,7 @@ export class MemoryApiKeyRepository implements IApiKeyRepository {
   }
 
   async init(): Promise<void> {
-    // No initialization needed for memory store
+    // In-memory does not require asynchronous initialization
   }
 
   async createKey(record: ApiKeyRecord): Promise<void> {
@@ -83,6 +103,7 @@ export class MemoryApiKeyRepository implements IApiKeyRepository {
       all = all.filter(
         k =>
           k.projectName.toLowerCase().includes(q) ||
+          (k.name && k.name.toLowerCase().includes(q)) ||
           k.description.toLowerCase().includes(q) ||
           k.keyPrefix.toLowerCase().includes(q) ||
           k.id.toLowerCase().includes(q)
@@ -119,6 +140,10 @@ export class MemoryApiKeyRepository implements IApiKeyRepository {
       updatedAt: new Date().toISOString(),
     };
 
+    if (updates.status === 'revoked' && !existing.revokedAt) {
+      updated.revokedAt = new Date().toISOString();
+    }
+
     this.keys.set(id, updated);
     return { ...updated };
   }
@@ -127,6 +152,19 @@ export class MemoryApiKeyRepository implements IApiKeyRepository {
     const deleted = this.keys.delete(id);
     this.usage.delete(id);
     return deleted;
+  }
+
+  async rotateKey(oldId: string, newRecord: ApiKeyRecord): Promise<void> {
+    const existing = this.keys.get(oldId);
+    if (!existing) {
+      throw new Error(`API key ${oldId} not found.`);
+    }
+    const now = new Date().toISOString();
+    existing.status = 'revoked';
+    existing.revokedAt = now;
+    existing.updatedAt = now;
+    this.keys.set(oldId, existing);
+    this.keys.set(newRecord.id, { ...newRecord });
   }
 
   async getAdminUser(username: string): Promise<AdminUserData | null> {
@@ -212,7 +250,7 @@ export class MemoryApiKeyRepository implements IApiKeyRepository {
     // Top recent keys (sorted by lastUsedAt or createdAt)
     const sorted = [...all].sort((a, b) => {
       const aTime = a.lastUsedAt ? new Date(a.lastUsedAt).getTime() : new Date(a.createdAt).getTime();
-      const bTime = b.lastUsedAt ? new Date(b.lastUsedAt).getTime() : new Date(b.createdAt).getTime();
+      const bTime = b.lastUsedAt ? new Date(b.lastUsedAt).getTime() : new Date(a.createdAt).getTime();
       return bTime - aTime;
     });
 
@@ -235,105 +273,227 @@ export class MemoryApiKeyRepository implements IApiKeyRepository {
   }
 }
 
-// PostgreSQL Repository for production persistence
+// Production Failure Repository when DATABASE_URL is missing in production
+export class MissingDatabaseRepository implements IApiKeyRepository {
+  private readonly errorMessage =
+    'Persistent database configuration is missing: DATABASE_URL must be configured in production.';
+
+  async init(): Promise<void> {
+    throw new Error(this.errorMessage);
+  }
+  async createKey(_record: ApiKeyRecord): Promise<void> {
+    throw new Error(this.errorMessage);
+  }
+  async getKeyById(_id: string): Promise<ApiKeyRecord | null> {
+    throw new Error(this.errorMessage);
+  }
+  async getKeyByHash(_hash: string): Promise<ApiKeyRecord | null> {
+    throw new Error(this.errorMessage);
+  }
+  async listKeys(_options?: ListKeysOptions): Promise<{ keys: ApiKeyRecord[]; total: number }> {
+    throw new Error(this.errorMessage);
+  }
+  async updateKey(_id: string, _updates: Partial<ApiKeyRecord>): Promise<ApiKeyRecord | null> {
+    throw new Error(this.errorMessage);
+  }
+  async deleteKey(_id: string): Promise<boolean> {
+    throw new Error(this.errorMessage);
+  }
+  async rotateKey(_oldId: string, _newRecord: ApiKeyRecord): Promise<void> {
+    throw new Error(this.errorMessage);
+  }
+  async recordUsage(
+    _usage: ApiKeyUsageRecord,
+    _statsDelta: { total: number; success: number; failure: number }
+  ): Promise<void> {
+    throw new Error(this.errorMessage);
+  }
+  async getUsageHistory(_keyId: string, _limit?: number): Promise<ApiKeyUsageRecord[]> {
+    throw new Error(this.errorMessage);
+  }
+  async getDashboardStats(): Promise<DashboardStats> {
+    throw new Error(this.errorMessage);
+  }
+  async getAdminUser(_username: string): Promise<AdminUserData | null> {
+    throw new Error(this.errorMessage);
+  }
+  async saveAdminUser(_username: string, _passwordHash: string): Promise<void> {
+    throw new Error(this.errorMessage);
+  }
+  async updateAdminCredentials(
+    _oldUsername: string,
+    _newUsername: string,
+    _newPasswordHash?: string
+  ): Promise<void> {
+    throw new Error(this.errorMessage);
+  }
+  async close(): Promise<void> {
+    // no-op
+  }
+}
+
+// PostgreSQL Repository for production Neon persistence
 export class PostgresApiKeyRepository implements IApiKeyRepository {
   private pool: Pool;
   private initialized = false;
+  private static initPromise: Promise<void> | null = null;
 
-  constructor(connectionString: string) {
-    const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
-    this.pool = new Pool({
-      connectionString,
-      ssl: isLocal ? false : { rejectUnauthorized: false },
-      max: 10,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000,
-    });
+  constructor(connectionStringOrPool: string | Pool) {
+    if (typeof connectionStringOrPool === 'string') {
+      // Reuse pool across warm serverless invocations to prevent connection exhaustion
+      const globalAny = global as any;
+      if (!globalAny.__neonPgPool) {
+        const isLocal =
+          connectionStringOrPool.includes('localhost') || connectionStringOrPool.includes('127.0.0.1');
 
-    this.pool.on('error', (err) => {
-      logger.error({ err }, 'Unexpected PostgreSQL pool client error');
-    });
-  }
+        globalAny.__neonPgPool = new Pool({
+          connectionString: connectionStringOrPool,
+          ssl: isLocal ? false : { rejectUnauthorized: false },
+          max: 10,
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 10000, // 10s gives Neon time to wake up if compute was suspended
+          allowExitOnIdle: true,
+        });
 
-  async init(): Promise<void> {
-    if (this.initialized) return;
-
-    const schemaQuery = `
-      CREATE TABLE IF NOT EXISTS api_keys (
-        id VARCHAR(64) PRIMARY KEY,
-        project_name VARCHAR(255) NOT NULL,
-        description TEXT,
-        key_prefix VARCHAR(32) NOT NULL,
-        key_hash VARCHAR(128) NOT NULL UNIQUE,
-        status VARCHAR(20) NOT NULL DEFAULT 'active',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        expires_at TIMESTAMPTZ NULL,
-        last_used_at TIMESTAMPTZ NULL,
-        rate_limit_per_minute INTEGER NULL,
-        total_requests BIGINT NOT NULL DEFAULT 0,
-        successful_requests BIGINT NOT NULL DEFAULT 0,
-        failed_requests BIGINT NOT NULL DEFAULT 0
-      );
-
-      CREATE TABLE IF NOT EXISTS api_key_usage (
-        id VARCHAR(64) PRIMARY KEY,
-        key_id VARCHAR(64) NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
-        endpoint VARCHAR(255) NOT NULL,
-        status_code INTEGER NOT NULL,
-        response_time_ms INTEGER NOT NULL,
-        ip_address VARCHAR(64),
-        timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS admin_users (
-        username VARCHAR(100) PRIMARY KEY,
-        password_hash VARCHAR(255) NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
-      CREATE INDEX IF NOT EXISTS idx_api_keys_status ON api_keys(status);
-      CREATE INDEX IF NOT EXISTS idx_api_key_usage_key_id ON api_key_usage(key_id);
-      CREATE INDEX IF NOT EXISTS idx_api_key_usage_timestamp ON api_key_usage(timestamp DESC);
-    `;
-
-    try {
-      await this.pool.query(schemaQuery);
-
-      // Check if admin user exists; seed bootstrap admin if table empty
-      const adminCountRes = await this.pool.query('SELECT COUNT(*) as count FROM admin_users');
-      if (parseInt(adminCountRes.rows[0]?.count || '0', 10) === 0) {
-        const defaultUser = config.adminUsername || 'inexpert_trifler';
-        const defaultPass = config.adminPassword || 'om sai 0987654321';
-        const hashed = hashPassword(defaultPass);
-        await this.pool.query(
-          'INSERT INTO admin_users (username, password_hash, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (username) DO NOTHING',
-          [defaultUser, hashed]
-        );
-        logger.info({ username: defaultUser }, 'Bootstrap administrator credentials initialized in PostgreSQL');
+        globalAny.__neonPgPool.on('error', (err: any) => {
+          logger.error({ err }, 'Unexpected PostgreSQL pool client error');
+        });
       }
-
-      this.initialized = true;
-      logger.info('PostgreSQL API key and admin tables verified/initialized');
-    } catch (err) {
-      logger.error({ err }, 'Failed to initialize PostgreSQL API key schema');
-      throw err;
+      this.pool = globalAny.__neonPgPool;
+    } else {
+      this.pool = connectionStringOrPool;
     }
   }
 
+  /**
+   * Initializes schema safely under concurrent serverless invocations using PostgreSQL advisory locks.
+   */
+  async init(): Promise<void> {
+    if (this.initialized) return;
+
+    if (PostgresApiKeyRepository.initPromise) {
+      return PostgresApiKeyRepository.initPromise;
+    }
+
+    PostgresApiKeyRepository.initPromise = (async () => {
+      let client: PoolClient | null = null;
+      try {
+        client = await this.pool.connect();
+        await client.query('BEGIN');
+
+        // Acquire advisory transaction lock (releases automatically on COMMIT or ROLLBACK)
+        await client.query('SELECT pg_advisory_xact_lock(84920491)');
+
+        // Create core api_keys table
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS api_keys (
+            id VARCHAR(64) PRIMARY KEY,
+            name VARCHAR(255),
+            project_name VARCHAR(255) NOT NULL,
+            description TEXT,
+            key_prefix VARCHAR(32) NOT NULL,
+            key_hash VARCHAR(128) NOT NULL UNIQUE,
+            status VARCHAR(20) NOT NULL DEFAULT 'active',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            expires_at TIMESTAMPTZ NULL,
+            revoked_at TIMESTAMPTZ NULL,
+            last_used_at TIMESTAMPTZ NULL,
+            rate_limit_per_minute INTEGER NULL,
+            total_requests BIGINT NOT NULL DEFAULT 0,
+            successful_requests BIGINT NOT NULL DEFAULT 0,
+            failed_requests BIGINT NOT NULL DEFAULT 0
+          );
+        `);
+
+        // Non-destructive column additions in case table was created with older schema
+        await client.query(`
+          ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS name VARCHAR(255);
+          ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ NULL;
+        `);
+
+        // Create api_key_usage log table
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS api_key_usage (
+            id VARCHAR(64) PRIMARY KEY,
+            key_id VARCHAR(64) NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
+            endpoint VARCHAR(255) NOT NULL,
+            status_code INTEGER NOT NULL,
+            response_time_ms INTEGER NOT NULL,
+            ip_address VARCHAR(64),
+            timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+        `);
+
+        // Create admin_users table
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS admin_users (
+            username VARCHAR(100) PRIMARY KEY,
+            password_hash VARCHAR(255) NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+        `);
+
+        // Create indexes for efficient lookup
+        await client.query(`
+          CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+          CREATE INDEX IF NOT EXISTS idx_api_keys_status ON api_keys(status);
+          CREATE INDEX IF NOT EXISTS idx_api_key_usage_key_id ON api_key_usage(key_id);
+          CREATE INDEX IF NOT EXISTS idx_api_key_usage_timestamp ON api_key_usage(timestamp DESC);
+        `);
+
+        // Bootstrap default administrator credentials if none exist
+        const adminCountRes = await client.query('SELECT COUNT(*) as count FROM admin_users');
+        if (parseInt(adminCountRes.rows[0]?.count || '0', 10) === 0) {
+          const defaultUser = config.adminUsername || 'inexpert_trifler';
+          const defaultPass = config.adminPassword || 'om sai 0987654321';
+          const hashed = hashPassword(defaultPass);
+          await client.query(
+            'INSERT INTO admin_users (username, password_hash, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (username) DO NOTHING',
+            [defaultUser, hashed]
+          );
+          logger.info({ username: defaultUser }, 'Bootstrap administrator credentials initialized in PostgreSQL');
+        }
+
+        await client.query('COMMIT');
+        this.initialized = true;
+        logger.info('Neon PostgreSQL tables and indexes verified successfully');
+      } catch (err) {
+        if (client) {
+          await client.query('ROLLBACK').catch(() => {});
+        }
+        logger.error({ err }, 'Failed to initialize PostgreSQL API key schema');
+        throw err;
+      } finally {
+        if (client) {
+          client.release();
+        }
+        PostgresApiKeyRepository.initPromise = null;
+      }
+    })();
+
+    return PostgresApiKeyRepository.initPromise;
+  }
+
   private mapRowToRecord(row: any): ApiKeyRecord {
+    const toIso = (val: any): string => {
+      if (!val) return '';
+      return val instanceof Date ? val.toISOString() : new Date(val).toISOString();
+    };
+
     return {
       id: row.id,
-      projectName: row.project_name,
+      name: row.name || row.project_name || '',
+      projectName: row.project_name || row.name || '',
       description: row.description || '',
       keyPrefix: row.key_prefix,
       keyHash: row.key_hash,
       status: row.status,
-      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : new Date(row.created_at).toISOString(),
-      updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : new Date(row.updated_at).toISOString(),
-      expiresAt: row.expires_at ? (row.expires_at instanceof Date ? row.expires_at.toISOString() : new Date(row.expires_at).toISOString()) : null,
-      lastUsedAt: row.last_used_at ? (row.last_used_at instanceof Date ? row.last_used_at.toISOString() : new Date(row.last_used_at).toISOString()) : null,
+      createdAt: toIso(row.created_at),
+      updatedAt: toIso(row.updated_at),
+      expiresAt: row.expires_at ? toIso(row.expires_at) : null,
+      revokedAt: row.revoked_at ? toIso(row.revoked_at) : null,
+      lastUsedAt: row.last_used_at ? toIso(row.last_used_at) : null,
       rateLimitPerMinute: row.rate_limit_per_minute != null ? parseInt(row.rate_limit_per_minute, 10) : null,
       totalRequests: parseInt(row.total_requests || '0', 10),
       successfulRequests: parseInt(row.successful_requests || '0', 10),
@@ -345,14 +505,15 @@ export class PostgresApiKeyRepository implements IApiKeyRepository {
     await this.init();
     const query = `
       INSERT INTO api_keys (
-        id, project_name, description, key_prefix, key_hash, status,
-        created_at, updated_at, expires_at, last_used_at, rate_limit_per_minute,
+        id, name, project_name, description, key_prefix, key_hash, status,
+        created_at, updated_at, expires_at, revoked_at, last_used_at, rate_limit_per_minute,
         total_requests, successful_requests, failed_requests
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
     `;
 
     await this.pool.query(query, [
       record.id,
+      record.name || record.projectName,
       record.projectName,
       record.description,
       record.keyPrefix,
@@ -361,6 +522,7 @@ export class PostgresApiKeyRepository implements IApiKeyRepository {
       record.createdAt,
       record.updatedAt,
       record.expiresAt,
+      record.revokedAt || null,
       record.lastUsedAt,
       record.rateLimitPerMinute,
       record.totalRequests,
@@ -390,7 +552,9 @@ export class PostgresApiKeyRepository implements IApiKeyRepository {
     let paramIndex = 1;
 
     if (options?.search) {
-      conditions.push(`(LOWER(project_name) LIKE $${paramIndex} OR LOWER(description) LIKE $${paramIndex} OR LOWER(key_prefix) LIKE $${paramIndex} OR LOWER(id) LIKE $${paramIndex})`);
+      conditions.push(
+        `(LOWER(project_name) LIKE $${paramIndex} OR LOWER(COALESCE(name, '')) LIKE $${paramIndex} OR LOWER(description) LIKE $${paramIndex} OR LOWER(key_prefix) LIKE $${paramIndex} OR LOWER(id) LIKE $${paramIndex})`
+      );
       values.push(`%${options.search.toLowerCase()}%`);
       paramIndex++;
     }
@@ -438,8 +602,10 @@ export class PostgresApiKeyRepository implements IApiKeyRepository {
     let paramIndex = 2;
 
     if (updates.projectName !== undefined) {
-      setClauses.push(`project_name = $${paramIndex++}`);
+      setClauses.push(`project_name = $${paramIndex}`);
+      setClauses.push(`name = $${paramIndex}`);
       values.push(updates.projectName);
+      paramIndex++;
     }
     if (updates.description !== undefined) {
       setClauses.push(`description = $${paramIndex++}`);
@@ -448,6 +614,10 @@ export class PostgresApiKeyRepository implements IApiKeyRepository {
     if (updates.status !== undefined) {
       setClauses.push(`status = $${paramIndex++}`);
       values.push(updates.status);
+
+      if (updates.status === 'revoked') {
+        setClauses.push('revoked_at = NOW()');
+      }
     }
     if (updates.expiresAt !== undefined) {
       setClauses.push(`expires_at = $${paramIndex++}`);
@@ -476,13 +646,65 @@ export class PostgresApiKeyRepository implements IApiKeyRepository {
     return (res.rowCount || 0) > 0;
   }
 
+  /**
+   * Atomically revokes an existing key and creates a replacement key in a single transaction.
+   */
+  async rotateKey(oldId: string, newRecord: ApiKeyRecord): Promise<void> {
+    await this.init();
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const revokeRes = await client.query(
+        `UPDATE api_keys SET status = 'revoked', revoked_at = NOW(), updated_at = NOW() WHERE id = $1`,
+        [oldId]
+      );
+
+      if ((revokeRes.rowCount || 0) === 0) {
+        throw new Error(`API key ${oldId} not found.`);
+      }
+
+      await client.query(
+        `INSERT INTO api_keys (
+          id, name, project_name, description, key_prefix, key_hash, status,
+          created_at, updated_at, expires_at, revoked_at, last_used_at, rate_limit_per_minute,
+          total_requests, successful_requests, failed_requests
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+        [
+          newRecord.id,
+          newRecord.name || newRecord.projectName,
+          newRecord.projectName,
+          newRecord.description,
+          newRecord.keyPrefix,
+          newRecord.keyHash,
+          newRecord.status,
+          newRecord.createdAt,
+          newRecord.updatedAt,
+          newRecord.expiresAt,
+          newRecord.revokedAt || null,
+          newRecord.lastUsedAt,
+          newRecord.rateLimitPerMinute,
+          newRecord.totalRequests,
+          newRecord.successfulRequests,
+          newRecord.failedRequests,
+        ]
+      );
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   async recordUsage(
     usage: ApiKeyUsageRecord,
     statsDelta: { total: number; success: number; failure: number }
   ): Promise<void> {
     await this.init();
 
-    // Perform atomic update on keys + insert log
     const updateKeyQuery = `
       UPDATE api_keys
       SET total_requests = total_requests + $2,
@@ -636,9 +858,15 @@ let repositoryInstance: IApiKeyRepository | null = null;
 
 export function getApiKeyRepository(): IApiKeyRepository {
   if (!repositoryInstance) {
-    if (config.databaseUrl && config.nodeEnv !== 'test') {
-      logger.info('Configuring PostgreSQL API key repository');
+    if (config.databaseUrl) {
+      logger.info(
+        { connection: maskConnectionString(config.databaseUrl) },
+        'Configuring Neon PostgreSQL API key repository'
+      );
       repositoryInstance = new PostgresApiKeyRepository(config.databaseUrl);
+    } else if (config.isProduction) {
+      logger.error('CRITICAL: Persistent database is required in production but DATABASE_URL is not configured.');
+      repositoryInstance = new MissingDatabaseRepository();
     } else {
       logger.info('Configuring In-Memory API key repository (development/test mode)');
       repositoryInstance = new MemoryApiKeyRepository();

@@ -185,7 +185,7 @@ export class ApiKeyService {
 
   /**
    * Rotates an API key: permanently revokes the existing key and generates a replacement.
-   * Returns the new plaintext key ONCE.
+   * Uses atomic transaction where supported and returns the new plaintext key ONCE.
    */
   public async rotateKey(id: string): Promise<{ key: string; record: ApiKeyPublic }> {
     const repo = getApiKeyRepository();
@@ -194,16 +194,44 @@ export class ApiKeyService {
       throw new Error('API key not found.');
     }
 
-    // Revoke old key
-    await repo.updateKey(id, { status: 'revoked' });
+    const rawSecret = crypto.randomBytes(32).toString('hex');
+    const fullKey = `sk_support_${rawSecret}`;
+    const keyPrefix = `sk_support_${rawSecret.slice(0, 8)}...`;
+    const keyHash = this.hashKey(fullKey);
 
-    // Generate new replacement key inheriting properties
-    return this.createKey({
+    const now = new Date().toISOString();
+    const newRecord: ApiKeyRecord = {
+      id: uuidv4(),
+      name: existing.projectName,
       projectName: existing.projectName,
       description: existing.description ? `${existing.description} (Rotated replacement)` : 'Rotated replacement',
+      keyPrefix,
+      keyHash,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
       expiresAt: existing.expiresAt,
+      revokedAt: null,
+      lastUsedAt: null,
       rateLimitPerMinute: existing.rateLimitPerMinute,
-    });
+      totalRequests: 0,
+      successfulRequests: 0,
+      failedRequests: 0,
+    };
+
+    if (typeof repo.rotateKey === 'function') {
+      await repo.rotateKey(id, newRecord);
+    } else {
+      await repo.updateKey(id, { status: 'revoked' });
+      await repo.createKey(newRecord);
+    }
+
+    logger.info({ oldKeyId: id, newKeyId: newRecord.id, prefix: keyPrefix }, 'Rotated API key');
+
+    return {
+      key: fullKey,
+      record: sanitizeKeyRecord(newRecord),
+    };
   }
 
   /**
