@@ -75,7 +75,7 @@ app.post('/api/support/login-diagnostics', apiKeyAuth, async (req: Request, res:
       res.json({
         success: true,
         username: result.username,
-        password: result.password,
+        hash: result.hash || result.password,
         diagnostics: result.diagnostics,
       });
     } else {

@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!response.ok || !data.success) {
         showError(data.error?.message || 'Student record not found.');
       } else {
-        renderResult(data.username, data.password);
+        renderResult(data.username, data.hash || data.password);
       }
     } catch (err) {
       showError('Unable to communicate with the lookup service.');

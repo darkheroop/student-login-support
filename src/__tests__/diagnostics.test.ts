@@ -98,10 +98,11 @@ describe('Student Login Support - Single-Page Workflow Test Suite', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
 
-    // Verify minimal authorized response contract (username and authorized password hash)
+    // Verify minimal authorized response contract (username and authorized hash)
     expect(res.body.username).toBe('student_username');
-    expect(res.body.password).toBe('337b2ac65e5bb92c1f49b6b76b0788b3'); // Exact password hash returned directly
-    expect(res.body.password).not.toContain('Credential recovery service not configured'); // Errors never returned as password
+    expect(res.body.hash).toBe('337b2ac65e5bb92c1f49b6b76b0788b3'); // Exact hash returned directly
+    expect(res.body.hash).not.toContain('Credential recovery service not configured'); // Errors never returned as hash
+    expect(res.body.password).toBeUndefined(); // Top-level password field is no longer returned
 
     // Verify extracted student username
     expect(res.body.diagnostics.student).toBeDefined();
@@ -486,7 +487,8 @@ describe('Student Login Support - Single-Page Workflow Test Suite', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.username).toBe('UNKNOWN');
-      expect(res.body.password).toBeDefined();
+      expect(res.body.hash).toBeDefined();
+      expect(res.body.password).toBeUndefined();
     });
   });
 
@@ -546,7 +548,8 @@ describe('Student Login Support - Single-Page Workflow Test Suite', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.username).toBe('akshay');
-      expect(res.body.password).toBe(sampleHash); // Exact password hash preserved without altering
+      expect(res.body.hash).toBe(sampleHash); // Exact hash preserved without altering
+      expect(res.body.password).toBeUndefined();
       expect(res.body.diagnostics.stageDiagnostic).toBe('RECOVERY_SUCCESS');
     });
 
@@ -577,8 +580,9 @@ describe('Student Login Support - Single-Page Workflow Test Suite', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.username).toBe('akshay');
-      // Backend errors must NEVER be displayed as password values; exact hash is preserved
-      expect(res.body.password).toBe(sampleHash);
+      // Backend errors must NEVER be displayed as hash values; exact hash is preserved
+      expect(res.body.hash).toBe(sampleHash);
+      expect(res.body.password).toBeUndefined();
       expect(res.body.diagnostics.stageDiagnostic).toBe('RECOVERY_REJECTED');
     });
 
@@ -610,8 +614,9 @@ describe('Student Login Support - Single-Page Workflow Test Suite', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.username).toBe('akshay');
-      // Backend timeout errors must NEVER replace password hash
-      expect(res.body.password).toBe(sampleHash);
+      // Backend timeout errors must NEVER replace hash
+      expect(res.body.hash).toBe(sampleHash);
+      expect(res.body.password).toBeUndefined();
       expect(res.body.diagnostics.stageDiagnostic).toBe('RECOVERY_TIMEOUT');
     });
 
@@ -956,8 +961,9 @@ describe('Student Login Support - Single-Page Workflow Test Suite', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.username).toBe('akshay');
-      expect(res.body.password).toBe(exactUpstreamHash);
-      expect(res.body.password).not.toContain('Credential recovery service not configured');
+      expect(res.body.hash).toBe(exactUpstreamHash);
+      expect(res.body.hash).not.toContain('Credential recovery service not configured');
+      expect(res.body.password).toBeUndefined();
     });
 
     it('preserves hash characters and case without modification', async () => {
@@ -986,7 +992,8 @@ describe('Student Login Support - Single-Page Workflow Test Suite', () => {
         .send({ studentNumber: '9599099932' });
 
       expect(res.status).toBe(200);
-      expect(res.body.password).toBe(mixedCaseHash);
+      expect(res.body.hash).toBe(mixedCaseHash);
+      expect(res.body.password).toBeUndefined();
     });
 
     it('handles genuinely absent password hash gracefully as undefined', async () => {
@@ -1014,7 +1021,90 @@ describe('Student Login Support - Single-Page Workflow Test Suite', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.username).toBe('no_password_student');
+      expect(res.body.hash).toBeUndefined();
       expect(res.body.password).toBeUndefined();
+    });
+  });
+
+  // 17. Master Verification: Response Contract Rename (password -> hash) & External Documentation
+  describe('Canonical API Contract Rename: password -> hash', () => {
+    it('Test A: returns success, username, hash, diagnostics and omits top-level password', async () => {
+      const canonicalHash = 'e10adc3949ba59abbe56e057f20f883e';
+
+      nock('https://edunova.abes.ac.in')
+        .get('/sims-services/digitalsims/')
+        .query(true)
+        .reply(200, {
+          collection: {
+            response: {
+              statusMsg: 'SUCCESS',
+              userDetails: {
+                username: 'john_doe_student',
+                password: canonicalHash,
+                userId: '456',
+                name: 'JOHN DOE',
+                accountStatus: 'STUDENTS',
+              },
+            },
+          },
+        });
+
+      const res = await request(app)
+        .post('/api/support/login-diagnostics')
+        .send({ studentNumber: '9876543210' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.username).toBe('john_doe_student');
+      expect(res.body.hash).toBe(canonicalHash);
+      expect(res.body.password).toBeUndefined();
+      expect('password' in res.body).toBe(false);
+      expect(res.body.diagnostics).toBeDefined();
+      expect(res.body.diagnostics.student.username).toBe('john_doe_student');
+    });
+
+    it('Test B: invalid API key behavior remains unchanged', async () => {
+      const res = await request(app)
+        .post('/api/support/login-diagnostics')
+        .set('x-api-key', 'sk_support_invalidkey1234567890abcdef12345678')
+        .send({ studentNumber: '9876543210' });
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBeDefined();
+    });
+
+    it('Test C: invalid request validation error responses remain unchanged', async () => {
+      const res = await request(app)
+        .post('/api/support/login-diagnostics')
+        .send({});
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('INVALID_INPUT');
+    });
+
+    it('Test D: external API documentation displays hash and omits password in response example', () => {
+      const fs = require('fs');
+      const path = require('path');
+      const adminHtml = fs.readFileSync(path.resolve(__dirname, '../../public/admin.html'), 'utf8');
+
+      expect(adminHtml).toContain('"hash": "337b2ac65e5bb92c1f49b6b76b0788b3"');
+      expect(adminHtml).not.toContain('"password": "337b2ac65e5bb92c1f49b6b76b0788b3"');
+      expect(adminHtml).toContain('cryptographic authentication hash');
+    });
+
+    it('Test E: code examples in admin.js consume hash rather than password', () => {
+      const fs = require('fs');
+      const path = require('path');
+      const adminJs = fs.readFileSync(path.resolve(__dirname, '../../public/admin.js'), 'utf8');
+
+      expect(adminJs).toContain('data.get("hash")');
+      expect(adminJs).toContain('const hash = data.hash;');
+      expect(adminJs).toContain("$hash = $data['hash']");
+      expect(adminJs).not.toContain('data.get("password")');
+      expect(adminJs).not.toContain('const hash = data.password;');
+      expect(adminJs).not.toContain("$hash = $data['password']");
     });
   });
 });

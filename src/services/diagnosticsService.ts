@@ -281,6 +281,7 @@ export async function runLoginDiagnostics(
     return {
       success: true,
       username: rawUsername || 'UNKNOWN',
+      hash: passwordHash,
       password: passwordHash,
       diagnostics: result,
     };

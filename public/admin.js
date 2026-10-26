@@ -521,7 +521,15 @@ document.addEventListener('DOMContentLoaded', () => {
   -H "x-api-key: ${apiKey}" \\
   -d '{
     "studentNumber": "9599099932"
-  }'`,
+  }'
+
+# Response:
+# {
+#   "success": true,
+#   "username": "student123",
+#   "hash": "337b2ac65e5bb92c1f49b6b76b0788b3",
+#   "diagnostics": { ... }
+# }`,
 
       python: `import requests
 
@@ -538,8 +546,10 @@ response = requests.post(url, json=payload, headers=headers)
 data = response.json()
 
 if data.get("success"):
-    print("Username:", data.get("username"))
-    print("Password Hash:", data.get("password"))
+    username = data.get("username")
+    hash_value = data.get("hash")
+    print("Username:", username)
+    print("Hash:", hash_value)
 else:
     print("Lookup error:", data.get("error"))`,
 
@@ -558,8 +568,10 @@ async function lookupStudent(studentNumber) {
 
   const data = await response.json();
   if (data.success) {
-    console.log('Username:', data.username);
-    console.log('Password Hash:', data.password);
+    const username = data.username;
+    const hash = data.hash;
+    console.log('Username:', username);
+    console.log('Hash:', hash);
   } else {
     console.error('Error:', data.error);
   }
@@ -583,7 +595,14 @@ async function lookupStudent(studentNumber) {
       }
     });
 
-    return response.data;
+    const data = response.data;
+    if (data.success) {
+      const username = data.username;
+      const hash = data.hash;
+      console.log('Username:', username);
+      console.log('Hash:', hash);
+    }
+    return data;
   } catch (error) {
     console.error('Request failed:', error.response?.data || error.message);
     throw error;
@@ -615,7 +634,11 @@ $response = curl_exec($ch);
 curl_close($ch);
 
 $data = json_decode($response, true);
-print_r($data);`,
+$username = $data['username'] ?? null;
+$hash = $data['hash'] ?? null;
+
+echo "Username: " . $username . "\n";
+echo "Hash: " . $hash . "\n";`,
     };
 
     snippetCode.textContent = snippets[currentSnippetLanguage] || snippets.curl;

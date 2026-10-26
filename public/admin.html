@@ -232,7 +232,7 @@
           <pre class="code-box"><code>{
   "success": true,
   "username": "student123",
-  "password": "337b2ac65e5bb92c1f49b6b76b0788b3",
+  "hash": "337b2ac65e5bb92c1f49b6b76b0788b3",
   "diagnostics": {
     "requestId": "5a415ff6-e179-4bc7-9ec9-923f03b57351",
     "durationMs": 850,
@@ -244,6 +244,11 @@
     }
   }
 }</code></pre>
+          <ul class="api-params-list">
+            <li><code>username</code> <em>(string)</em>: The returned student username.</li>
+            <li><code>hash</code> <em>(string)</em>: The cryptographic authentication hash value returned by the API (not a plaintext password).</li>
+            <li><code>diagnostics</code> <em>(object)</em>: Diagnostic telemetry and verified account metadata.</li>
+          </ul>
         </div>
 
         <!-- Code Snippets Tabs -->

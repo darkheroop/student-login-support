@@ -78,6 +78,7 @@ export interface DiagnosticsResult {
 export interface DiagnosticsResponse {
   success: boolean;
   username?: string;
+  hash?: string;
   password?: string;
   diagnostics?: DiagnosticsResult;
   error?: {
