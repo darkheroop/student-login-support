@@ -13,6 +13,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const resultsCard = document.getElementById('results-card');
   const outputUsername = document.getElementById('output-username');
   const outputPassword = document.getElementById('output-password');
+  const copyHashBtn = document.getElementById('copy-hash-btn');
+  const copyFeedback = document.getElementById('copy-feedback');
+  let copyTimeout = null;
 
   // Input change clears validation error
   studentInput.addEventListener('input', () => {
@@ -81,6 +84,7 @@ document.addEventListener('DOMContentLoaded', () => {
       loadingCard.hidden = false;
       errorCard.hidden = true;
       resultsCard.hidden = true;
+      if (copyHashBtn) copyHashBtn.hidden = true;
     } else {
       loadingCard.hidden = true;
     }
@@ -91,15 +95,70 @@ document.addEventListener('DOMContentLoaded', () => {
     errorCard.hidden = false;
     resultsCard.hidden = true;
     loadingCard.hidden = true;
+    if (copyHashBtn) copyHashBtn.hidden = true;
   }
 
   function renderResult(username, password) {
+    const hasValidHash = Boolean(password && typeof password === 'string' && password.trim() && password.trim() !== 'Password hash unavailable');
     outputUsername.textContent = username || '-';
-    outputPassword.textContent = (password && typeof password === 'string' && password.trim())
-      ? password
-      : 'Password hash unavailable';
+    outputPassword.textContent = hasValidHash ? password.trim() : 'Password hash unavailable';
+
+    if (copyHashBtn) {
+      copyHashBtn.hidden = !hasValidHash;
+      copyHashBtn.classList.remove('copied', 'copy-error');
+      if (copyFeedback) copyFeedback.textContent = '';
+      copyHashBtn.setAttribute('title', 'Copy hash');
+    }
+
     resultsCard.hidden = false;
     errorCard.hidden = true;
     loadingCard.hidden = true;
   }
+
+  // Copy hash to clipboard handler
+  copyHashBtn?.addEventListener('click', async () => {
+    const hashToCopy = outputPassword.textContent ? outputPassword.textContent.trim() : '';
+    if (!hashToCopy || hashToCopy === 'Password hash unavailable' || hashToCopy === '-') {
+      return;
+    }
+
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(hashToCopy);
+      } else {
+        // Fallback for non-secure / older browser contexts
+        const textArea = document.createElement('textarea');
+        textArea.value = hashToCopy;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (!successful) throw new Error('Copy command failed');
+      }
+
+      copyHashBtn.classList.add('copied');
+      copyHashBtn.classList.remove('copy-error');
+      if (copyFeedback) copyFeedback.textContent = 'Copied!';
+      copyHashBtn.setAttribute('title', 'Copied to clipboard!');
+
+      clearTimeout(copyTimeout);
+      copyTimeout = setTimeout(() => {
+        copyHashBtn.classList.remove('copied');
+        if (copyFeedback) copyFeedback.textContent = '';
+        copyHashBtn.setAttribute('title', 'Copy hash');
+      }, 2000);
+    } catch (err) {
+      copyHashBtn.classList.add('copy-error');
+      if (copyFeedback) copyFeedback.textContent = 'Failed';
+      clearTimeout(copyTimeout);
+      copyTimeout = setTimeout(() => {
+        copyHashBtn.classList.remove('copy-error');
+        if (copyFeedback) copyFeedback.textContent = '';
+      }, 2500);
+    }
+  });
 });

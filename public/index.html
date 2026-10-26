@@ -69,7 +69,7 @@
         </div>
       </section>
 
-      <!-- Final Output Card: Exactly Username and Password Result Only -->
+      <!-- Final Output Card: Exactly Username and Hash Result Only -->
       <section id="results-card" class="card results-card" hidden>
         <div class="result-display-grid">
           <div class="result-row">
@@ -77,8 +77,24 @@
             <span id="output-username" class="result-value font-mono">-</span>
           </div>
           <div class="result-row">
-            <span class="result-label">Password:</span>
-            <span id="output-password" class="result-value font-mono">-</span>
+            <span class="result-label" data-field="Password:">Hash:</span>
+            <div class="hash-container">
+              <span id="output-password" class="result-value font-mono">-</span>
+              <button
+                type="button"
+                id="copy-hash-btn"
+                class="copy-hash-btn"
+                aria-label="Copy hash"
+                title="Copy hash"
+                hidden
+              >
+                <svg class="copy-svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span id="copy-feedback" class="copy-feedback" aria-live="polite"></span>
+              </button>
+            </div>
           </div>
         </div>
       </section>

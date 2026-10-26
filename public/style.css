@@ -695,6 +695,61 @@ body {
   word-break: break-all;
 }
 
+.hash-container {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.copy-hash-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.copy-hash-btn:hover {
+  background: rgba(37, 99, 235, 0.2);
+  border-color: var(--primary);
+  color: var(--primary-light);
+}
+
+.copy-hash-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.copy-hash-btn.copied {
+  background: var(--success-bg);
+  border-color: var(--success-border);
+  color: var(--success);
+}
+
+.copy-hash-btn.copy-error {
+  background: var(--error-bg);
+  border-color: var(--error-border);
+  color: var(--error);
+}
+
+.copy-feedback {
+  font-size: 0.75rem;
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+
 /* Student Account & Credential Summary Card */
 .credential-summary-card {
   background: rgba(13, 17, 23, 0.7);
