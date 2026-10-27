@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config';
 import logger from '../utils/logger';
 import { DiagnosticEvent } from '../types';
+import { upstreamHttpClient } from '../utils/httpClient';
 
 async function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -91,7 +92,7 @@ export async function executeUpstreamRequest(
     }
 
     try {
-      const response = await axios({
+      const response = await upstreamHttpClient({
         method: options.method,
         url,
         params: options.params,
@@ -105,9 +106,6 @@ export async function executeUpstreamRequest(
           ...options.headers,
         },
         timeout: config.upstreamTimeoutMs,
-        validateStatus: () => true, // capture all status codes (2xx, 4xx, 5xx) without throwing
-        maxRedirects: 5,
-        transformResponse: [(data) => data], // Preserve raw response body
       });
 
       const durationMs = Date.now() - startTime;

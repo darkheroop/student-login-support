@@ -99,10 +99,15 @@ const publicPathCandidates = [
 const publicDir = publicPathCandidates.find(p => fs.existsSync(p));
 
 if (publicDir) {
-  app.use(express.static(publicDir));
+  // Cache static assets (CSS, JS, fonts, icons) with maxAge in production
+  app.use(express.static(publicDir, {
+    maxAge: config.isProduction ? '1d' : 0,
+    etag: true,
+  }));
 
   // Admin Dashboard routes
   app.get(['/admin', '/admin/*'], (_req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(path.join(publicDir, 'admin.html'));
   });
 
@@ -110,6 +115,7 @@ if (publicDir) {
     if (req.path.startsWith('/api')) {
       return next();
     }
+    res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(path.join(publicDir, 'index.html'));
   });
 }

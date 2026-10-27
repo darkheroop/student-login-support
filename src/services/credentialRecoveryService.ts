@@ -2,6 +2,7 @@ import axios from 'axios';
 import { config } from '../config';
 import { DiagnosticStage } from '../types';
 import logger from '../utils/logger';
+import { httpKeepAliveAgent, httpsKeepAliveAgent } from '../utils/httpClient';
 
 export interface CredentialRecoveryResult {
   hasPlaintext: boolean;
@@ -106,6 +107,8 @@ export class HttpCredentialRecoveryAdapter implements CredentialRecoveryAdapter 
         {
           headers,
           timeout: this.timeoutMs,
+          httpAgent: httpKeepAliveAgent,
+          httpsAgent: httpsKeepAliveAgent,
           validateStatus: (status) => status >= 200 && status < 300,
         }
       );

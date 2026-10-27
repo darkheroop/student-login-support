@@ -81,15 +81,31 @@ function analyzeResponse(event: DiagnosticEvent): DiagnosticAnalysis {
   };
 }
 
-export async function runLoginDiagnostics(
-  mobileInput: string,
+// In-flight lookup deduplication cache: key -> active execution promise
+const inFlightRequests = new Map<string, Promise<DiagnosticsResponse>>();
+
+function cloneDiagnosticsResponse(res: DiagnosticsResponse): DiagnosticsResponse {
+  if (!res.diagnostics) {
+    return { ...res };
+  }
+  const freshRunId = uuidv4();
+  return {
+    ...res,
+    diagnostics: {
+      ...res.diagnostics,
+      requestId: freshRunId,
+      events: res.diagnostics.events ? res.diagnostics.events.map(e => ({ ...e, requestId: freshRunId })) : [],
+    },
+  };
+}
+
+async function executeLoginDiagnosticsInternal(
+  cleanMobile: string,
   recoveryAdapter?: CredentialRecoveryAdapter
 ): Promise<DiagnosticsResponse> {
   const runId = uuidv4();
   const startedAt = new Date().toISOString();
   const events: DiagnosticEvent[] = [];
-
-  const cleanMobile = cleanMobileNumber(mobileInput);
   const effectiveAdapter = recoveryAdapter !== undefined ? recoveryAdapter : getDefaultRecoveryAdapter();
 
   try {
@@ -297,6 +313,34 @@ export async function runLoginDiagnostics(
       'Diagnostics service unexpected exception'
     );
     throw err;
+  }
+}
+
+/**
+ * Executes login diagnostics with Singleflight in-flight request deduplication.
+ * Eliminates redundant concurrent upstream calls for the same student identifier.
+ */
+export async function runLoginDiagnostics(
+  mobileInput: string,
+  recoveryAdapter?: CredentialRecoveryAdapter
+): Promise<DiagnosticsResponse> {
+  const cleanMobile = cleanMobileNumber(mobileInput);
+  const adapterKey = recoveryAdapter ? recoveryAdapter.name : 'default';
+  const flightKey = `${cleanMobile}:${adapterKey}`;
+
+  const inFlight = inFlightRequests.get(flightKey);
+  if (inFlight) {
+    const existingResult = await inFlight;
+    return cloneDiagnosticsResponse(existingResult);
+  }
+
+  const lookupPromise = executeLoginDiagnosticsInternal(cleanMobile, recoveryAdapter);
+  inFlightRequests.set(flightKey, lookupPromise);
+
+  try {
+    return await lookupPromise;
+  } finally {
+    inFlightRequests.delete(flightKey);
   }
 }
 

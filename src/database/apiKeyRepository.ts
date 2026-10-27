@@ -352,6 +352,9 @@ export class PostgresApiKeyRepository implements IApiKeyRepository {
           max: 10,
           idleTimeoutMillis: 30000,
           connectionTimeoutMillis: 10000, // 10s gives Neon time to wake up if compute was suspended
+          statement_timeout: 5000, // 5s statement timeout prevents hanging queries from exhausting pool
+          keepAlive: true,
+          keepAliveInitialDelayMillis: 10000,
           allowExitOnIdle: true,
         });
 

@@ -16,6 +16,16 @@ import logger from '../utils/logger';
 // In-memory rate limiter per key (sliding window 60s)
 const keyRateLimitWindows = new Map<string, number[]>();
 
+interface CachedKeyEntry {
+  record: ApiKeyRecord;
+  cachedAt: number;
+}
+
+// In-memory TTL/LRU cache for active validated API keys to eliminate database network RTT on hot paths
+const keyValidationCache = new Map<string, CachedKeyEntry>();
+const KEY_CACHE_TTL_MS = 30_000; // 30 seconds
+const KEY_CACHE_MAX_ENTRIES = 500;
+
 export class ApiKeyService {
   private static instance: ApiKeyService;
 
@@ -24,6 +34,17 @@ export class ApiKeyService {
       ApiKeyService.instance = new ApiKeyService();
     }
     return ApiKeyService.instance;
+  }
+
+  /**
+   * Invalidates cached keys. Called on key update, revoke, rotate, or delete.
+   */
+  public invalidateKeyCache(keyHash?: string): void {
+    if (keyHash) {
+      keyValidationCache.delete(keyHash);
+    } else {
+      keyValidationCache.clear();
+    }
   }
 
   /**
@@ -153,6 +174,7 @@ export class ApiKeyService {
     }
 
     const updated = await repo.updateKey(id, updates);
+    this.invalidateKeyCache();
     return updated ? sanitizeKeyRecord(updated) : null;
   }
 
@@ -171,6 +193,7 @@ export class ApiKeyService {
     }
 
     const updated = await repo.updateKey(id, { status: 'revoked' });
+    this.invalidateKeyCache(existing.keyHash);
     logger.warn({ keyId: id, prefix: existing.keyPrefix }, 'API key permanently revoked');
     return updated ? sanitizeKeyRecord(updated) : null;
   }
@@ -180,6 +203,10 @@ export class ApiKeyService {
    */
   public async deleteKey(id: string): Promise<boolean> {
     const repo = getApiKeyRepository();
+    const existing = await repo.getKeyById(id);
+    if (existing) {
+      this.invalidateKeyCache(existing.keyHash);
+    }
     return repo.deleteKey(id);
   }
 
@@ -193,6 +220,8 @@ export class ApiKeyService {
     if (!existing) {
       throw new Error('API key not found.');
     }
+
+    this.invalidateKeyCache(existing.keyHash);
 
     const rawSecret = crypto.randomBytes(32).toString('hex');
     const fullKey = `sk_support_${rawSecret}`;
@@ -248,18 +277,35 @@ export class ApiKeyService {
     }
 
     const hash = this.hashKey(trimmedKey);
-    const repo = getApiKeyRepository();
-    const key = await repo.getKeyByHash(hash);
+    const nowMs = Date.now();
+    let key: ApiKeyRecord | null = null;
+
+    const cached = keyValidationCache.get(hash);
+    if (cached && nowMs - cached.cachedAt < KEY_CACHE_TTL_MS) {
+      key = cached.record;
+    } else {
+      const repo = getApiKeyRepository();
+      key = await repo.getKeyByHash(hash);
+      if (key && key.status === 'active') {
+        if (keyValidationCache.size >= KEY_CACHE_MAX_ENTRIES) {
+          const oldestKey = keyValidationCache.keys().next().value;
+          if (oldestKey) keyValidationCache.delete(oldestKey);
+        }
+        keyValidationCache.set(hash, { record: key, cachedAt: nowMs });
+      }
+    }
 
     if (!key) {
       return { valid: false, error: 'INVALID_KEY', message: 'API key is not recognized or invalid.' };
     }
 
     if (key.status === 'revoked') {
+      keyValidationCache.delete(hash);
       return { valid: false, error: 'KEY_REVOKED', message: 'This API key has been permanently revoked.' };
     }
 
     if (key.status === 'disabled') {
+      keyValidationCache.delete(hash);
       return { valid: false, error: 'KEY_DISABLED', message: 'This API key is currently disabled.' };
     }
 
@@ -267,7 +313,8 @@ export class ApiKeyService {
     if (key.expiresAt) {
       const expirationDate = new Date(key.expiresAt);
       if (expirationDate <= new Date()) {
-        // Mark as expired in background
+        keyValidationCache.delete(hash);
+        const repo = getApiKeyRepository();
         repo.updateKey(key.id, { status: 'expired' }).catch(() => {});
         return { valid: false, error: 'KEY_EXPIRED', message: 'This API key has expired.' };
       }

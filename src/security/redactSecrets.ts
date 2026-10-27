@@ -22,12 +22,38 @@ const SENSITIVE_KEY_PATTERNS = [
   /authPin/i,
 ];
 
+const NON_SENSITIVE_PATTERN = /status|message|msg|count|type|time|attempt|flag|success/i;
+const SENSITIVE_FAST_CHECK = /password|passwd|otp|token|secret|authorization|cookie|cvv|ssn|pin/i;
+const SENSITIVE_KEY_CACHE = new Map<string, boolean>();
+const MAX_KEY_CACHE_SIZE = 500;
+
 function isSensitiveKey(key: string): boolean {
+  const cached = SENSITIVE_KEY_CACHE.get(key);
+  if (cached !== undefined) {
+    return cached;
+  }
+
   // Never redact operational diagnostics or status fields
-  if (/status|message|msg|count|type|time|attempt|flag|success/i.test(key)) {
+  if (NON_SENSITIVE_PATTERN.test(key)) {
+    if (SENSITIVE_KEY_CACHE.size < MAX_KEY_CACHE_SIZE) {
+      SENSITIVE_KEY_CACHE.set(key, false);
+    }
     return false;
   }
-  return SENSITIVE_KEY_PATTERNS.some(pattern => pattern.test(key));
+
+  // Fast pre-filter: if key does not contain any sensitive root words, skip regex array
+  if (!SENSITIVE_FAST_CHECK.test(key)) {
+    if (SENSITIVE_KEY_CACHE.size < MAX_KEY_CACHE_SIZE) {
+      SENSITIVE_KEY_CACHE.set(key, false);
+    }
+    return false;
+  }
+
+  const result = SENSITIVE_KEY_PATTERNS.some(pattern => pattern.test(key));
+  if (SENSITIVE_KEY_CACHE.size < MAX_KEY_CACHE_SIZE) {
+    SENSITIVE_KEY_CACHE.set(key, result);
+  }
+  return result;
 }
 
 /**
